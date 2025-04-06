@@ -46,12 +46,10 @@ log:
 
 ### 3. 运行
 ```bash
-# 默认模式 - 处理 Git SSH 请求
-./gitolite-shell
-
 # 同步模式 - 一次性同步密钥
 ./gitolite-shell -sync
-
+# ~/.ssh/authorized_keys 示例
+command="gitolite-shell gitadmin",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty "gerrit publickey"
 # 守护模式 - 后台运行定期同步密钥
 ./gitolite-shell -daemon
 ```
