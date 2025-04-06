@@ -1,0 +1,11 @@
+repo_base: /home/git/repositories
+gerrit_url: https://gerrit.url.com
+gerrit_user: gitadmin
+gerrit_remote_url: ssh://gitadmin@gerrit.url.com:29418
+gerrit_api_token: XXXXX
+authorized_keys: /home/git/.ssh/authorized_keys
+log:
+  path: /home/git/gitolite/gitolite-shell.log
+  level: INFO
+  rotation: daily  # daily 或 weekly
+  compress: true   # 是否压缩旧日志
