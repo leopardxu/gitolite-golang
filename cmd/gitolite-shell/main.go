@@ -17,9 +17,9 @@ import (
 
 func main() {
 	// 解析命令行参数
-	syncMode := flag.Bool("sync", false, "仅运行同步任务")
+	syncMode := flag.Bool("sync", false, "仅运行key同步任务")
 	daemonMode := flag.Bool("daemon", false, "以守护进程模式运行同步任务")
-	configPath := flag.String("config", "/home/git/.gitolite/config.yaml", "配置文件路径")
+	configPath := flag.String("config", "/home/cixtech/.gitolite/config.yaml", "配置文件路径")
 	flag.Parse()
 
 	// 初始化配置和日志
@@ -61,7 +61,16 @@ func initConfigAndLogging(configPath string) (*config.Config, error) {
 		return nil, fmt.Errorf("创建日志目录失败: %w", err)
 	}
 
-	if err := log.Init(cfg.Log.Path, logLevel); err != nil {
+	// 使用完整的日志配置初始化日志系统
+	logConfig := log.LogConfig{
+		Path:     cfg.Log.Path,
+		Level:    logLevel,
+		Rotation: cfg.Log.Rotation,
+		Compress: cfg.Log.Compress,
+		MaxAge:   cfg.Log.MaxAge,
+	}
+
+	if err := log.InitWithConfig(logConfig); err != nil {
 		return nil, fmt.Errorf("初始化日志失败: %w", err)
 	}
 
@@ -111,22 +120,33 @@ func runNormalMode(cfg *config.Config) error {
 	// 1. 解析SSH原始命令
 	sshCommand := os.Getenv("SSH_ORIGINAL_COMMAND")
 	if sshCommand == "" {
-		return fmt.Errorf("未设置SSH_ORIGINAL_COMMAND环境变量")
+		log.Log(log.WARN, "未设置SSH_ORIGINAL_COMMAND环境变量，可能是用户直接SSH登录")
+		// 提供友好的提示信息而不是直接返回错误
+		fmt.Println("欢迎使用Gitolite-Golang，请通过Git命令访问仓库。")
+		return nil
 	}
 
 	log.Log(log.INFO, fmt.Sprintf("处理SSH命令: %s", sshCommand))
 
-	// 直接解析命令，不使用protocol包的函数
+	// 改进命令解析逻辑，处理可能包含选项的情况
 	parts := strings.Fields(sshCommand)
-	if len(parts) < 2 {
+	if len(parts) < 1 {
 		return fmt.Errorf("无效的SSH命令格式")
 	}
 
 	verb := parts[0]
+	
+	// 确保有足够的参数来获取仓库名
+	if len(parts) < 2 {
+		return fmt.Errorf("命令缺少仓库参数")
+	}
+	
 	repo := strings.Trim(strings.Join(parts[1:], " "), "'\"")
-
+	
 	// 处理可能的绝对路径问题
 	repo = strings.TrimPrefix(repo, "/")
+	// 处理可能的绝对路径问题，确保不包含repo_base前缀
+	repo = strings.TrimPrefix(repo, cfg.RepoBase)
 
 	// 获取用户信息，优先使用GL_USER，如果未设置则尝试使用SSH_USER或USER
 	user := os.Getenv("GL_USER")
@@ -153,12 +173,24 @@ func runNormalMode(cfg *config.Config) error {
 	case "gerrit-replication":
 		return handleGerritReplication(cfg, user, repo)
 	default:
+		// 检查是否是mkdir命令，提供更明确的错误信息
+		if strings.Contains(verb, "mkdir") {
+			log.Log(log.ERROR, fmt.Sprintf("不支持的Git命令: %s，应使用repo_base作为基础路径", verb))
+			return fmt.Errorf("不支持直接执行mkdir命令，请使用git-receive-pack或git-upload-pack命令")
+		}
 		return fmt.Errorf("不支持的Git命令: %s", verb)
 	}
 }
 
 // 处理Gerrit replication同步任务
 func handleGerritReplication(cfg *config.Config, user, repo string) error {
+	// 确保仓库名称格式正确
+	repo = strings.TrimPrefix(repo, "/")
+	// 确保不包含repo_base前缀
+	repo = strings.TrimPrefix(repo, cfg.RepoBase)
+	// 移除可能的.git后缀，后面会重新添加
+	repo = strings.TrimSuffix(repo, ".git")
+
 	// 记录SSH连接信息
 	remoteAddr := os.Getenv("SSH_CLIENT")
 	pid := os.Getpid()
@@ -214,32 +246,73 @@ func handleGerritReplication(cfg *config.Config, user, repo string) error {
 	// 记录结束标记
 	log.Log(log.INFO, fmt.Sprintf("%d END", pid))
 
+	// 执行钩子脚本
+	runHooks(cfg, "post-receive", repo, user)
+
 	return nil
 }
 
 // 处理仓库初始化
 func handleRepoInit(cfg *config.Config, user, repo string) error {
+	// 确保仓库路径格式正确
+	repo = strings.TrimPrefix(repo, "/")
+	// 确保不包含repo_base前缀
+	repo = strings.TrimPrefix(repo, cfg.RepoBase)
+	// 移除可能的.git后缀
+	repo = strings.TrimSuffix(repo, ".git")
+	// 构建完整的仓库路径
 	repoPath := filepath.Join(cfg.RepoBase, repo+".git")
 
 	// 检查仓库是否已存在
 	if _, err := os.Stat(repoPath); err == nil {
-		log.Log(log.INFO, fmt.Sprintf("仓库已存在，跳过初始化: %s", repo))
+		log.Log(log.INFO, fmt.Sprintf("仓库已存在，跳过初始化: %s (完整路径: %s)", repo, repoPath))
 		return nil
 	}
 
 	// 创建仓库目录
+	log.Log(log.INFO, fmt.Sprintf("创建仓库目录: %s", repoPath))
 	if err := os.MkdirAll(repoPath, 0755); err != nil {
-		return fmt.Errorf("创建仓库目录失败: %w", err)
+		return fmt.Errorf("创建仓库目录失败: %w (路径: %s)", err, repoPath)
 	}
 
-	// 修正：在仓库目录内执行git init --bare
+	// 在仓库目录内执行git init --bare
 	cmd := exec.Command("git", "init", "--bare")
 	cmd.Dir = repoPath // 设置工作目录为仓库路径
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Log(log.ERROR, fmt.Sprintf("初始化裸仓库失败: %v, 输出: %s", err, string(output)))
 		return fmt.Errorf("初始化裸仓库失败: %w", err)
 	}
 
-	log.Log(log.INFO, fmt.Sprintf("用户 %s 成功创建仓库 %s", user, repo))
+	// 设置默认分支（如果需要）
+	branchName := "master" // 默认分支名
+	// 检查命令中是否包含分支信息
+	if strings.Contains(os.Getenv("SSH_ORIGINAL_COMMAND"), "git symbolic-ref HEAD") {
+		// 从原始命令中提取分支名
+		cmdStr := os.Getenv("SSH_ORIGINAL_COMMAND")
+		refParts := strings.Split(cmdStr, "'refs/heads/")
+		if len(refParts) >= 2 {
+			branchEnd := strings.Index(refParts[1], "'")
+			if branchEnd > 0 {
+				branchName = refParts[1][:branchEnd]
+			}
+		}
+	}
+
+	// 设置默认分支
+	if branchName != "master" {
+		refCmd := exec.Command("git", "symbolic-ref", "HEAD", fmt.Sprintf("refs/heads/%s", branchName))
+		refCmd.Dir = repoPath
+		refOutput, refErr := refCmd.CombinedOutput()
+		if refErr != nil {
+			log.Log(log.WARN, fmt.Sprintf("设置默认分支失败: %v, 输出: %s", refErr, string(refOutput)))
+			// 不返回错误，因为主要操作已经成功
+		} else {
+			log.Log(log.INFO, fmt.Sprintf("成功设置默认分支为: %s", branchName))
+		}
+	}
+
+	log.Log(log.INFO, fmt.Sprintf("用户 %s 成功创建仓库 %s (完整路径: %s)", user, repo, repoPath))
 
 	// 创建仓库后进行全量同步
 	log.Log(log.INFO, fmt.Sprintf("开始对新仓库 %s 进行全量同步", repo))
@@ -250,19 +323,38 @@ func handleRepoInit(cfg *config.Config, user, repo string) error {
 		log.Log(log.INFO, fmt.Sprintf("新仓库 %s 同步成功", repo))
 	}
 
+	// 执行钩子脚本
+	runHooks(cfg, "post-create", repo, user)
+
 	return nil
 }
 
 // 处理Git操作
 func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
-	// 确保仓库名称不重复添加.git后缀
+	// 确保仓库名称格式正确
+	repo = strings.TrimPrefix(repo, "/")
+	// 确保不包含repo_base前缀
+	repo = strings.TrimPrefix(repo, cfg.RepoBase)
+	// 移除可能的.git后缀
 	repoBase := strings.TrimSuffix(repo, ".git")
 
 	// 只对非同步用户进行权限检查
 	if user != "gerrit-replication" && user != "git" {
+		// 改进错误处理，捕获并记录API调用的详细错误
 		allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repoBase,
 			cfg.GerritUser, cfg.GerritAPIToken)
 		if err != nil {
+			// 记录详细错误信息，帮助诊断问题
+			log.Log(log.ERROR, fmt.Sprintf("Gerrit API调用失败: %v (URL: %s, User: %s, Repo: %s)",
+				err, cfg.GerritURL, user, repoBase))
+			
+			// 检查错误是否包含特定字符串，可能是命令行参数错误
+			errStr := err.Error()
+			if strings.Contains(errStr, "--account") {
+				log.Log(log.WARN, "检测到可能的Gerrit API参数错误，请检查配置")
+				return fmt.Errorf("Gerrit API配置错误，请联系管理员")
+			}
+			
 			return fmt.Errorf("检查访问权限失败: %w", err)
 		}
 		if !allowed {
@@ -286,6 +378,13 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 		}
 	}
 
+	// 执行pre-receive钩子（仅对推送操作）
+	if verb == "git-receive-pack" {
+		if err := runHooks(cfg, "pre-receive", repoBase, user); err != nil {
+			return fmt.Errorf("pre-receive钩子执行失败: %w", err)
+		}
+	}
+
 	// 执行Git命令，传递不带.git后缀的仓库名
 	err := git.ExecuteGitCommand(verb, repoBase, cfg.RepoBase)
 
@@ -304,6 +403,12 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 					pid, repoPath, ref.RefName, ref.OldHash, ref.NewHash))
 			}
 		}
+
+		// 执行post-receive钩子
+		if err := runHooks(cfg, "post-receive", repoBase, user); err != nil {
+			log.Log(log.WARN, fmt.Sprintf("post-receive钩子执行失败: %v", err))
+			// 不返回错误，因为主要操作已经成功
+		}
 	}
 
 	return err
@@ -311,7 +416,11 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 
 // 处理Git归档操作
 func handleGitArchive(cfg *config.Config, user, repo string) error {
-	// 确保仓库名称不重复添加.git后缀
+	// 确保仓库名称格式正确
+	repo = strings.TrimPrefix(repo, "/")
+	// 确保不包含repo_base前缀
+	repo = strings.TrimPrefix(repo, cfg.RepoBase)
+	// 移除可能的.git后缀
 	repoBase := strings.TrimSuffix(repo, ".git")
 
 	// 只对非同步用户进行权限检查
@@ -331,8 +440,44 @@ func handleGitArchive(cfg *config.Config, user, repo string) error {
 	// 检查仓库是否存在
 	repoPath := filepath.Join(cfg.RepoBase, repoBase+".git")
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
-		return fmt.Errorf("仓库不存在: %s", repoBase)
+		return fmt.Errorf("仓库不存在: %s", repoPath)
 	}
 
 	return git.ExecuteGitCommand("git-upload-archive", repoBase, cfg.RepoBase)
+}
+
+// 执行钩子脚本
+func runHooks(cfg *config.Config, hookType, repo, user string) error {
+	// 检查钩子目录是否存在
+	hooksDir := cfg.HooksDir
+	if hooksDir == "" {
+		hooksDir = "~/.gitolite/hooks"
+	}
+
+	// 构建钩子脚本路径
+	hookPath := filepath.Join(hooksDir, hookType)
+	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
+		// 钩子脚本不存在，跳过执行
+		log.Log(log.INFO, fmt.Sprintf("钩子脚本不存在，跳过执行: %s", hookPath))
+		return nil
+	}
+
+	// 设置环境变量
+	cmd := exec.Command(hookPath)
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("GL_REPO=%s", repo),
+		fmt.Sprintf("GL_USER=%s", user),
+	)
+
+	// 执行钩子脚本
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Log(log.ERROR, fmt.Sprintf("钩子脚本执行失败: %s, 错误: %v, 输出: %s",
+			hookPath, err, string(output)))
+		return fmt.Errorf("钩子脚本执行失败: %w", err)
+	}
+
+	log.Log(log.INFO, fmt.Sprintf("钩子脚本执行成功: %s, 输出: %s",
+		hookPath, string(output)))
+	return nil
 }
