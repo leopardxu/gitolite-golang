@@ -7,28 +7,30 @@ import (
 	"gitolite-golang/internal/log"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
 // CheckAccess 检查用户是否有权限访问仓库
-func CheckAccess(gerritURL, username, repo, apiUser, apiToken string) (bool, error) {
+func CheckAccess(gerritURL, username, repo, gerritUser, gerritToken string) (bool, error) {
 	// 对于特定用户，直接返回有权限
 	if username == "gerrit-replication" || username == "git" || username == "gitadmin"  {
 		return true, nil
 	}
 
-	// 构建API请求URL
-	url := fmt.Sprintf("%s/a/access/?project=%s&account=%s", gerritURL, repo, username)
-
+	// 构建API URL
+	apiURL := fmt.Sprintf("%s/a/projects/%s/access", gerritURL, url.PathEscape(repo))
+	
 	// 创建请求
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return false, fmt.Errorf("创建请求失败: %w", err)
 	}
-
-	// 设置基本认证
-	req.SetBasicAuth(apiUser, apiToken)
-
+	
+	// 设置认证
+	req.SetBasicAuth(gerritUser, gerritToken)
+	
 	// 发送请求
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -36,12 +38,15 @@ func CheckAccess(gerritURL, username, repo, apiUser, apiToken string) (bool, err
 		return false, fmt.Errorf("发送请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-
-	// 读取响应内容
+	
+	// 读取响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return false, fmt.Errorf("读取响应失败: %w", err)
 	}
+	
+	// 记录响应状态码
+	log.Log(log.INFO, fmt.Sprintf("Gerrit API响应状态码: %d", resp.StatusCode))
 
 	// 记录原始响应以便调试
 	log.Log(log.INFO, fmt.Sprintf("Gerrit API响应状态码: %d", resp.StatusCode))
@@ -74,11 +79,20 @@ func CheckAccess(gerritURL, username, repo, apiUser, apiToken string) (bool, err
 		}
 		log.Log(log.ERROR, errMsg)
 
+		// 检查是否包含特定错误信息
+		rawResponse := string(body)
+		if strings.Contains(rawResponse, "--account") {
+			log.Log(log.ERROR, fmt.Sprintf("检测到Gerrit API参数错误: %s", rawResponse))
+			return false, fmt.Errorf("Gerrit API调用失败: %s (URL: `%s,` User: %s, Repo: %s)", 
+				rawResponse, gerritURL, username, repo)
+		}
+
 		// 尝试使用更宽松的方式解析
 		var anyData interface{}
 		if jsonErr := json.Unmarshal(jsonBody, &anyData); jsonErr != nil {
 			// 如果连宽松解析也失败，则返回错误
-			return false, fmt.Errorf("解析响应失败: %w", err)
+			return false, fmt.Errorf("解析响应失败: %w (URL: `%s,` User: %s, Repo: %s)", 
+				err, gerritURL, username, repo)
 		}
 
 		// 如果宽松解析成功，则假定有权限（避免因解析问题阻止访问）

@@ -1,0 +1,36 @@
+# Gitolite 配置文件模板
+
+# 用户组定义
+@administrators = gitadmin admin
+@developers = dev1 dev2 dev3
+@testers = test1 test2
+@readers = user1 user2 user3
+
+# 仓库权限配置
+repo gitolite-admin
+    RW+     =   @administrators
+
+repo project1
+    RW+     =   @administrators
+    RW      =   @developers
+    R       =   @testers @readers
+
+# 通配符仓库配置
+repo public/.*
+    RW+     =   @administrators
+    RW      =   @developers
+    R       =   @all
+
+# 个人仓库配置
+repo users/CREATOR/.*
+    C       =   @all
+    RW+     =   CREATOR
+    RW      =   WRITERS
+    R       =   READERS
+
+# 基于分支的访问控制
+repo advanced-project
+    RW+     =   @administrators
+    RW  master    =   @developers
+    RW  feature/.* =   @developers
+    R       =   @all

@@ -16,6 +16,8 @@ type Config struct {
 	GerritRemoteURL string    `yaml:"gerrit_remote_url"` // 添加Gerrit远程URL配置
 	GerritAPIToken string    `yaml:"gerrit_api_token"`
 	AuthorizedKeys string    `yaml:"authorized_keys"`
+	AccessConfig   string    `yaml:"access_config"`      // Gitolite风格的权限配置文件路径
+	HooksDir       string    `yaml:"hooks_dir"`         // 钩子脚本目录
 	Log            LogConfig `yaml:"log"`
 }
 
@@ -25,6 +27,7 @@ type LogConfig struct {
 	Level    string `yaml:"level"`
 	Rotation string `yaml:"rotation"`
 	Compress bool   `yaml:"compress"`
+	MaxAge   int    `yaml:"max_age"`    // 日志保留天数
 }
 
 // LoadConfig 加载配置文件并支持环境变量覆盖
@@ -72,6 +75,13 @@ func validateConfig(config *Config) error {
 	}
 	if config.AuthorizedKeys == "" {
 		return fmt.Errorf("缺少必要配置: authorized_keys")
+	}
+	// 设置默认值
+	if config.AccessConfig == "" {
+		config.AccessConfig = "/home/git/.gitolite/conf/gitolite.conf"
+	}
+	if config.HooksDir == "" {
+		config.HooksDir = "/home/git/.gitolite/hooks"
 	}
 	return nil
 }
