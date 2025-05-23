@@ -17,8 +17,8 @@ func ParseSSHCommand(cmd string) (verb, repo string, err error) {
 	}
 
 	// 处理特殊命令，如创建仓库的命令
-	log.Printf("[INFO] cmd: %s ",cmd)
-	log.Printf("[INFO] cmd: %s ",cmd)
+	log.Printf("[INFO] cmd: %s ", cmd)
+	log.Printf("[INFO] cmd: %s ", cmd)
 	if strings.Contains(cmd, "mkdir -p") && strings.Contains(cmd, "git init --bare") {
 		log.Printf("[DEBUG] 检测到创建仓库命令")
 		// 这是一个创建仓库的命令，提取仓库路径
@@ -70,12 +70,14 @@ func ParseSSHCommand(cmd string) (verb, repo string, err error) {
 		return "", "", fmt.Errorf("invalid SSH command: %s", cmd)
 	}
 
-	// 检查仓库名称是否为绝对路径
-	if strings.HasPrefix(matches[2], "/") {
-		log.Printf("[ERROR] 无效的仓库名称: 仓库名称不能是绝对路径 - %s", matches[2])
-		return "", "", fmt.Errorf("无效的仓库名称: 仓库名称不能是绝对路径")
+	// 处理仓库路径
+	// 如果是以/开头的简化路径，移除开头的/
+	repoPath := matches[2]
+	if strings.HasPrefix(repoPath, "/") {
+		repoPath = strings.TrimPrefix(repoPath, "/")
+		log.Printf("[INFO] 检测到简化路径格式，转换为相对路径: %s", repoPath)
 	}
 
-	log.Printf("[INFO] 解析结果: verb=%s, repo=%s", matches[1], matches[2])
-	return matches[1], matches[2], nil
+	log.Printf("[INFO] 解析结果: verb=%s, repo=%s", matches[1], repoPath)
+	return matches[1], repoPath, nil
 }

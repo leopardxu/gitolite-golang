@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"gitolite-golang/internal/log"
-	"gitolite-golang/internal/validator"
 )
 
 // RefUpdate 表示Git引用更新信息
@@ -22,6 +21,10 @@ type RefUpdate struct {
 
 // ExecuteGitCommand 执行 Git 命令，增加安全验证
 func ExecuteGitCommand(verb, repo, repoBase string) error {
+	// 处理仓库路径
+	// 确保repo不包含.git后缀，因为我们会在后面添加
+	repo = strings.TrimSuffix(repo, ".git")
+	// 如果是相对路径，添加repoBase前缀
 	repoPath := filepath.Join(repoBase, repo+".git")
 
 	// 处理初始化仓库的命令
@@ -47,16 +50,15 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 
 		return nil
 	}
-	// 验证仓库名称
-	if err := validator.ValidateRepoName(repo); err != nil {
-		return fmt.Errorf("无效的仓库名称: %v", err)
+	// 验证仓库名称 - 允许包含子目录的仓库路径
+	// 注意：这里我们允许仓库名称包含斜杠，以支持子目录结构
+	// 例如：ffmpeg_repo/ffmpeg
+	if strings.Contains(repo, "../") || strings.Contains(repo, "./") {
+		return fmt.Errorf("无效的仓库名称: 包含不允许的路径导航符号")
 	}
 
-	// // 验证并构建安全的仓库路径
-	// repoPath, err := validator.ValidatePath(repoBase, repo)
-	// if err != nil {
-	// 	return fmt.Errorf("无效的仓库路径: %v", err)
-	// }
+	// 记录仓库路径信息
+	log.Log(log.INFO, fmt.Sprintf("处理仓库: %s, 完整路径: %s", repo, repoPath))
 
 	// 检查仓库是否存在，如果不存在且是推送操作，则初始化仓库
 	if verb == "git-receive-pack" {
@@ -68,6 +70,8 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 	}
 
 	// 构建 Git 命令
+	// 使用仓库路径而不是仓库名称，确保支持子目录结构
+	log.Log(log.INFO, fmt.Sprintf("执行Git命令: %s 于仓库: %s", verb, repoPath))
 	gitCommand := fmt.Sprintf("%s '%s'", verb, repoPath)
 
 	// 执行命令

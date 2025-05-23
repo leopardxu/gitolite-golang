@@ -127,6 +127,11 @@ func runNormalMode(cfg *config.Config) error {
 	}
 
 	log.Log(log.INFO, fmt.Sprintf("处理SSH命令: %s", sshCommand))
+	// 记录仓库路径信息
+	log.Log(log.INFO, fmt.Sprintf("仓库基础路径: %s", cfg.RepoBase))
+	// 构建完整仓库路径用于日志记录
+	// fullRepoPath := filepath.Join(cfg.RepoBase, repo+".git")
+	// log.Log(log.INFO, fmt.Sprintf("完整仓库路径: %s", fullRepoPath))
 
 	// 改进命令解析逻辑，处理可能包含选项的情况
 	parts := strings.Fields(sshCommand)
@@ -135,18 +140,20 @@ func runNormalMode(cfg *config.Config) error {
 	}
 
 	verb := parts[0]
-	
+
 	// 确保有足够的参数来获取仓库名
 	if len(parts) < 2 {
 		return fmt.Errorf("命令缺少仓库参数")
 	}
-	
+
 	repo := strings.Trim(strings.Join(parts[1:], " "), "'\"")
-	
+
 	// 处理可能的绝对路径问题
 	repo = strings.TrimPrefix(repo, "/")
 	// 处理可能的绝对路径问题，确保不包含repo_base前缀
 	repo = strings.TrimPrefix(repo, cfg.RepoBase)
+	// 记录处理后的仓库路径
+	log.Log(log.INFO, fmt.Sprintf("处理后的仓库路径: %s", repo))
 
 	// 获取用户信息，优先使用GL_USER，如果未设置则尝试使用SSH_USER或USER
 	user := os.Getenv("GL_USER")
@@ -188,6 +195,8 @@ func handleGerritReplication(cfg *config.Config, user, repo string) error {
 	repo = strings.TrimPrefix(repo, "/")
 	// 确保不包含repo_base前缀
 	repo = strings.TrimPrefix(repo, cfg.RepoBase)
+	// 记录处理中的仓库路径
+	log.Log(log.INFO, fmt.Sprintf("处理Gerrit复制的仓库路径: %s", repo))
 	// 移除可能的.git后缀，后面会重新添加
 	repo = strings.TrimSuffix(repo, ".git")
 
@@ -258,6 +267,8 @@ func handleRepoInit(cfg *config.Config, user, repo string) error {
 	repo = strings.TrimPrefix(repo, "/")
 	// 确保不包含repo_base前缀
 	repo = strings.TrimPrefix(repo, cfg.RepoBase)
+	// 记录处理中的仓库路径
+	log.Log(log.INFO, fmt.Sprintf("初始化仓库路径: %s", repo))
 	// 移除可能的.git后缀
 	repo = strings.TrimSuffix(repo, ".git")
 	// 构建完整的仓库路径
@@ -335,6 +346,8 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 	repo = strings.TrimPrefix(repo, "/")
 	// 确保不包含repo_base前缀
 	repo = strings.TrimPrefix(repo, cfg.RepoBase)
+	// 记录处理中的仓库路径
+	log.Log(log.INFO, fmt.Sprintf("处理Git操作的仓库路径: %s", repo))
 	// 移除可能的.git后缀
 	repoBase := strings.TrimSuffix(repo, ".git")
 
@@ -347,14 +360,14 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 			// 记录详细错误信息，帮助诊断问题
 			log.Log(log.ERROR, fmt.Sprintf("Gerrit API调用失败: %v (URL: %s, User: %s, Repo: %s)",
 				err, cfg.GerritURL, user, repoBase))
-			
+
 			// 检查错误是否包含特定字符串，可能是命令行参数错误
 			errStr := err.Error()
 			if strings.Contains(errStr, "--account") {
 				log.Log(log.WARN, "检测到可能的Gerrit API参数错误，请检查配置")
 				return fmt.Errorf("Gerrit API配置错误，请联系管理员")
 			}
-			
+
 			return fmt.Errorf("检查访问权限失败: %w", err)
 		}
 		if !allowed {
@@ -420,6 +433,8 @@ func handleGitArchive(cfg *config.Config, user, repo string) error {
 	repo = strings.TrimPrefix(repo, "/")
 	// 确保不包含repo_base前缀
 	repo = strings.TrimPrefix(repo, cfg.RepoBase)
+	// 记录处理中的仓库路径
+	log.Log(log.INFO, fmt.Sprintf("处理归档操作的仓库路径: %s", repo))
 	// 移除可能的.git后缀
 	repoBase := strings.TrimSuffix(repo, ".git")
 

@@ -1,6 +1,7 @@
 # Gitolite-Golang 配置文件
 
 # 基础配置
+# repo_base: 仓库基础路径，支持简化路径格式如 ssh://user@host/path/to/repo.git
 repo_base: /home/git/repositories
 gerrit_url: https://gerrit.url.com
 gerrit_user: gitadmin

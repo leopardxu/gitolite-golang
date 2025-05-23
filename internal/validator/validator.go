@@ -12,12 +12,10 @@ func ValidateRepoName(repo string) error {
 	if strings.Contains(repo, "..") {
 		return errors.New("仓库名称包含非法字符序列 '..'")
 	}
-	
-	// 检查是否是绝对路径
-	if filepath.IsAbs(repo) {
-		return errors.New("仓库名称不能是绝对路径")
-	}
-	
+
+	// 注意：不再检查是否是绝对路径，因为我们现在支持简化路径格式
+	// 在SSH协议处理中已经将绝对路径转换为相对路径
+
 	// 检查是否包含特殊字符
 	invalidChars := []string{"\\", ";", "&", "|", ">", "<", "*", "?", "`", "$", "!", "#"}
 	for _, char := range invalidChars {
@@ -25,7 +23,7 @@ func ValidateRepoName(repo string) error {
 			return errors.New("仓库名称包含非法字符: " + char)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -33,14 +31,14 @@ func ValidateRepoName(repo string) error {
 func ValidatePath(basePath, relativePath string) (string, error) {
 	// 构建完整路径
 	fullPath := filepath.Join(basePath, relativePath)
-	
+
 	// 规范化路径
 	fullPath = filepath.Clean(fullPath)
-	
+
 	// 确保结果路径仍在基础路径下
 	if !strings.HasPrefix(fullPath, basePath) {
 		return "", errors.New("路径超出了允许的范围")
 	}
-	
+
 	return fullPath, nil
 }
