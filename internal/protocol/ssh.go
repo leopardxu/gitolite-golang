@@ -7,77 +7,92 @@ import (
 	"strings"
 )
 
-// ParseSSHCommand 解析 SSH 请求
+// ParseSSHCommand parses SSH requests
 func ParseSSHCommand(cmd string) (verb, repo string, err error) {
-	log.Printf("[DEBUG] 开始解析SSH命令: %s", cmd)
+	log.Printf("[DEBUG] Starting to parse SSH command: %s", cmd)
 
 	if cmd == "" {
-		log.Printf("[ERROR] SSH_ORIGINAL_COMMAND 环境变量未设置")
-		return "", "", fmt.Errorf("SSH_ORIGINAL_COMMAND 环境变量未设置")
+		log.Printf("[ERROR] SSH_ORIGINAL_COMMAND environment variable not set")
+		return "", "", fmt.Errorf("SSH_ORIGINAL_COMMAND environment variable not set")
 	}
 
-	// 处理特殊命令，如创建仓库的命令
-	log.Printf("[INFO] cmd: %s ", cmd)
+	// Handle special commands, such as repository creation commands
 	log.Printf("[INFO] cmd: %s ", cmd)
 	if strings.Contains(cmd, "mkdir -p") && strings.Contains(cmd, "git init --bare") {
-		log.Printf("[DEBUG] 检测到创建仓库命令")
-		// 这是一个创建仓库的命令，提取仓库路径
+		log.Printf("[DEBUG] Repository creation command detected")
+		// This is a repository creation command, extract the repository path
 		repoPathStart := strings.Index(cmd, "'")
 		repoPathEnd := strings.Index(cmd[repoPathStart+1:], "'")
-		log.Printf("[DEBUG] 仓库路径引号位置: 开始=%d, 结束=%d", repoPathStart, repoPathEnd)
+		log.Printf("[DEBUG] Repository path quote positions: start=%d, end=%d", repoPathStart, repoPathEnd)
 
 		if repoPathStart >= 0 && repoPathEnd >= 0 {
 			repoPath := cmd[repoPathStart+1 : repoPathStart+1+repoPathEnd]
-			log.Printf("[DEBUG] 提取的仓库路径: %s", repoPath)
+			log.Printf("[DEBUG] Extracted repository path: %s", repoPath)
 
-			// 修改：使用完整路径作为仓库名称，而不仅仅是最后一部分
+			// Modification: Use the full path as the repository name, not just the last part
 			repoName := repoPath
 
-			// 如果路径以 .git 结尾，移除它
+			// If the path ends with .git, remove it
 			if strings.HasSuffix(repoName, ".git") {
 				repoName = repoName[:len(repoName)-4]
-				log.Printf("[DEBUG] 移除.git后缀后的仓库路径: %s", repoName)
+				log.Printf("[DEBUG] Repository path after removing .git suffix: %s", repoName)
 			}
 
-			// 检查仓库名称是否为绝对路径
-			// if strings.HasPrefix(repoName, "/") {
-			// 	log.Printf("[ERROR] 无效的仓库名称: 仓库名称不能是绝对路径 - %s", repoName)
-			// 	return "", "", fmt.Errorf("无效的仓库名称: 仓库名称不能是绝对路径")
-			// }
+			// Sanitize repository name to prevent command injection
+			repoName = sanitizeRepoName(repoName)
 
-			log.Printf("[INFO] 解析结果: verb=init, repo=%s", repoName)
+			log.Printf("[INFO] Parse result: verb=init, repo=%s", repoName)
 			return "init", repoName, nil
 		}
-		log.Printf("[ERROR] 无法从命令中提取仓库路径")
+		log.Printf("[ERROR] Unable to extract repository path from command")
 	}
 
-	// 原有的 git 命令解析逻辑
-	log.Printf("[DEBUG] 使用正则表达式解析git命令")
+	// Original git command parsing logic
+	log.Printf("[DEBUG] Using regex to parse git command")
 	parts := strings.Split(cmd, " ")
-	log.Printf("[DEBUG] 命令分割结果: %v", parts)
+	log.Printf("[DEBUG] Command split result: %v", parts)
 
 	if len(parts) < 2 {
-		log.Printf("[ERROR] 无效的SSH命令: %s", cmd)
+		log.Printf("[ERROR] Invalid SSH command: %s", cmd)
 		return "", "", fmt.Errorf("invalid SSH command: %s", cmd)
 	}
 
-	re := regexp.MustCompile(`^(git-upload-pack|git-receive-pack) '?(.*?)'?$`)
+	re := regexp.MustCompile(`^(git-upload-pack|git-receive-pack|git-upload-archive) '?(.*?)'?$`)
 	matches := re.FindStringSubmatch(cmd)
-	log.Printf("[DEBUG] 正则匹配结果: %v", matches)
+	log.Printf("[DEBUG] Regex match result: %v", matches)
 
 	if len(matches) != 3 {
-		log.Printf("[ERROR] 无效的SSH命令: %s", cmd)
+		log.Printf("[ERROR] Invalid SSH command: %s", cmd)
 		return "", "", fmt.Errorf("invalid SSH command: %s", cmd)
 	}
 
-	// 处理仓库路径
-	// 如果是以/开头的简化路径，移除开头的/
+	// Process repository path
+	// If it's a simplified path starting with /, remove the leading /
 	repoPath := matches[2]
+	repoPath = sanitizeRepoName(repoPath)
+
 	if strings.HasPrefix(repoPath, "/") {
 		repoPath = strings.TrimPrefix(repoPath, "/")
-		log.Printf("[INFO] 检测到简化路径格式，转换为相对路径: %s", repoPath)
+		log.Printf("[INFO] Simplified path format detected, converted to relative path: %s", repoPath)
 	}
 
-	log.Printf("[INFO] 解析结果: verb=%s, repo=%s", matches[1], repoPath)
+	log.Printf("[INFO] Parse result: verb=%s, repo=%s", matches[1], repoPath)
 	return matches[1], repoPath, nil
+}
+
+// sanitizeRepoName removes potentially dangerous characters from repository names
+// to prevent command injection and other security issues
+func sanitizeRepoName(repo string) string {
+	// Remove any characters that could be used for command injection
+	dangerousChars := []string{"'", "`", ";", "&", "|", ">", "<", "$", "(", ")", "[", "]", "{", "}", "\\"}
+	result := repo
+	
+	for _, char := range dangerousChars {
+		result = strings.ReplaceAll(result, char, "")
+	}
+	
+	// Also remove any potential path traversal sequences
+	result = strings.ReplaceAll(result, "..", "")
+	
+	return result
 }

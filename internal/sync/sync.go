@@ -39,13 +39,13 @@ func StartSyncTask(gerritURL, apiUser, apiToken, authorizedKeysPath string) {
 	c.Start()
 }
 func WriteAuthorizedKeys(keys []string, path string) error {
-	// 读取现有的 authorized_keys 文件
+	// Read existing authorized_keys file
 	existingData, err := ioutil.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("读取现有 authorized_keys 文件失败: %v", err)
+		return fmt.Errorf("failed to read existing authorized_keys file: %v", err)
 	}
 
-	// 解析现有的密钥
+	// Parse existing keys
 	existingKeys := make(map[string]bool)
 	if len(existingData) > 0 {
 		for _, line := range strings.Split(string(existingData), "\n") {
@@ -55,7 +55,7 @@ func WriteAuthorizedKeys(keys []string, path string) error {
 		}
 	}
 
-	// 合并新密钥，避免重复
+	// Merge new keys, avoid duplicates
 	var allKeys []string
 	for _, key := range keys {
 		if !existingKeys[key] {
@@ -64,14 +64,14 @@ func WriteAuthorizedKeys(keys []string, path string) error {
 		}
 	}
 
-	// 将现有密钥添加到结果中
+	// Add existing keys to the result
 	for line := range existingKeys {
 		if line != "" {
 			allKeys = append(allKeys, line)
 		}
 	}
 
-	// 写入合并后的密钥
+	// Write merged keys
 	data := []byte(strings.Join(allKeys, "\n") + "\n")
 	return ioutil.WriteFile(path, data, 0600)
 }
@@ -79,12 +79,12 @@ func WriteAuthorizedKeys(keys []string, path string) error {
 func ConvertToGitoliteFormat(keys []GerritSSHKey) []string {
 	var gitoliteKeys []string
 	for _, key := range keys {
-		// 确保 SSH 密钥和用户名都不为空
+		// Ensure SSH key and username are not empty
 		if key.SSHKey == "" || key.Username == "" {
 			continue
 		}
 
-		// 使用正确的格式：包含用户名和 SSH 密钥
+		// Use correct format: include username and SSH key
 		gitoliteKey := fmt.Sprintf(
 			`command="gitolite-shell %s",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty %s`,
 			key.Username,
@@ -98,10 +98,10 @@ func ConvertToGitoliteFormat(keys []GerritSSHKey) []string {
 func FetchGerritSSHKeys(gerritURL, gerritUser, apiToken string) ([]GerritSSHKey, error) {
 	client := &http.Client{}
 
-	// 获取所有用户列表
+	// Get all user list
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/a/accounts/?q=is:active&o=DETAILS", gerritURL), nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建用户列表请求失败: %v", err)
+		return nil, fmt.Errorf("failed to create user list request: %v", err)
 	}
 
 	req.SetBasicAuth(gerritUser, apiToken)
@@ -109,39 +109,39 @@ func FetchGerritSSHKeys(gerritURL, gerritUser, apiToken string) ([]GerritSSHKey,
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("获取用户列表失败: %v", err)
+		return nil, fmt.Errorf("failed to get user list: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("获取用户列表时状态码异常: %d, 响应: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("abnormal status code when getting user list: %d, response: %s", resp.StatusCode, string(body))
 	}
 
 	rawBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("读取用户列表响应失败: %v", err)
+		return nil, fmt.Errorf("failed to read user list response: %v", err)
 	}
 
-	// 移除Gerrit魔术前缀 - 修复前缀检测逻辑
+	// Remove Gerrit magic prefix - fix prefix detection logic
 	if len(rawBody) > 4 && string(rawBody[0:4]) == ")]}}'" {
 		rawBody = rawBody[4:]
 	} else if len(rawBody) > 4 && string(rawBody[0:4]) == ")]}'" {
 		rawBody = rawBody[4:]
 	}
 
-	// 尝试解析为数组
+	// Try to parse as array
 	var usersArray []map[string]interface{}
 	if err := json.Unmarshal(rawBody, &usersArray); err != nil {
-		return nil, fmt.Errorf("解析用户列表失败: %v, 原始响应: %s", err, string(rawBody))
+		return nil, fmt.Errorf("failed to parse user list: %v, original response: %s", err, string(rawBody))
 	}
 
-	// 处理用户数组
+	// Process user array
 	var allKeys []GerritSSHKey
 	for _, userObj := range usersArray {
 		username, ok := userObj["username"].(string)
 		if !ok || username == "" {
-			// 尝试从name或email获取用户名
+			// Try to get username from name or email
 			if name, ok := userObj["name"].(string); ok && name != "" {
 				username = name
 			} else if email, ok := userObj["email"].(string); ok && email != "" {
@@ -157,10 +157,10 @@ func FetchGerritSSHKeys(gerritURL, gerritUser, apiToken string) ([]GerritSSHKey,
 			continue
 		}
 
-		// 获取用户的SSH密钥
+		// Get user's SSH keys
 		keys, err := fetchUserSSHKeys(client, gerritURL, gerritUser, apiToken, int(accountID), username)
 		if err != nil {
-			fmt.Printf("获取用户 %s 的SSH密钥失败: %v\n", username, err)
+			fmt.Printf("Failed to get SSH keys for user %s: %v\n", username, err)
 			continue
 		}
 
@@ -170,11 +170,11 @@ func FetchGerritSSHKeys(gerritURL, gerritUser, apiToken string) ([]GerritSSHKey,
 	return allKeys, nil
 }
 
-// 辅助函数：获取单个用户的SSH密钥
+// Helper function: get SSH keys for a single user
 func fetchUserSSHKeys(client *http.Client, gerritURL, gerritUser, apiToken string, accountID int, username string) ([]GerritSSHKey, error) {
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/a/accounts/%d/sshkeys", gerritURL, accountID), nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建SSH密钥请求失败: %v", err)
+		return nil, fmt.Errorf("failed to create SSH key request: %v", err)
 	}
 
 	req.SetBasicAuth(gerritUser, apiToken)
@@ -182,38 +182,38 @@ func fetchUserSSHKeys(client *http.Client, gerritURL, gerritUser, apiToken strin
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("获取SSH密钥失败: %v", err)
+		return nil, fmt.Errorf("failed to get SSH keys: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("获取SSH密钥时状态码异常: %d, 响应: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("abnormal status code when getting SSH keys: %d, response: %s", resp.StatusCode, string(body))
 	}
 
 	rawBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("读取SSH密钥响应失败: %v", err)
+		return nil, fmt.Errorf("failed to read SSH key response: %v", err)
 	}
 
-	// 移除Gerrit魔术前缀 - 修复前缀检测逻辑
+	// Remove Gerrit magic prefix - fix prefix detection logic
 	if len(rawBody) > 4 && string(rawBody[0:4]) == ")]}}'" {
 		rawBody = rawBody[4:]
 	} else if len(rawBody) > 4 && string(rawBody[0:4]) == ")]}'" {
 		rawBody = rawBody[4:]
 	}
 
-	// 尝试解析为数组
+	// Try to parse as array
 	var keysArray []map[string]interface{}
 	if err := json.Unmarshal(rawBody, &keysArray); err != nil {
-		return nil, fmt.Errorf("解析SSH密钥失败: %v, 原始响应: %s", err, string(rawBody))
+		return nil, fmt.Errorf("failed to parse SSH keys: %v, original response: %s", err, string(rawBody))
 	}
 
 	var keys []GerritSSHKey
 	for _, keyObj := range keysArray {
 		sshKey, ok := keyObj["ssh_public_key"].(string)
 		if !ok || sshKey == "" {
-			// 尝试其他可能的字段名
+			// Try other possible field names
 			if key, ok := keyObj["key"].(string); ok && key != "" {
 				sshKey = key
 			} else {

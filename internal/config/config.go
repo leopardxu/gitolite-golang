@@ -2,47 +2,49 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
+
+	"gitolite-golang/internal/mirror"
 
 	"gopkg.in/yaml.v2"
 )
 
-// Config 结构体定义
+// Config structure definition
 type Config struct {
-	RepoBase       string    `yaml:"repo_base"`
-	GerritURL      string    `yaml:"gerrit_url"`
-	GerritUser     string    `yaml:"gerrit_user"`
-	GerritRemoteURL string    `yaml:"gerrit_remote_url"` // 添加Gerrit远程URL配置
-	GerritAPIToken string    `yaml:"gerrit_api_token"`
-	AuthorizedKeys string    `yaml:"authorized_keys"`
-	AccessConfig   string    `yaml:"access_config"`      // Gitolite风格的权限配置文件路径
-	HooksDir       string    `yaml:"hooks_dir"`         // 钩子脚本目录
-	Log            LogConfig `yaml:"log"`
+	RepoBase        string              `yaml:"repo_base"`
+	GerritURL       string              `yaml:"gerrit_url"`
+	GerritUser      string              `yaml:"gerrit_user"`
+	GerritRemoteURL string              `yaml:"gerrit_remote_url"` // Add Gerrit remote URL configuration
+	GerritAPIToken  string              `yaml:"gerrit_api_token"`
+	AuthorizedKeys  string              `yaml:"authorized_keys"`
+	AccessConfig    string              `yaml:"access_config"` // Path to Gitolite-style permission configuration file
+	HooksDir        string              `yaml:"hooks_dir"`     // Hook scripts directory
+	Mirror          mirror.MirrorConfig `yaml:"mirror"`        // Mirror configuration
+	Log             LogConfig           `yaml:"log"`
 }
 
-// LogConfig 日志配置
+// LogConfig log configuration
 type LogConfig struct {
 	Path     string `yaml:"path"`
 	Level    string `yaml:"level"`
 	Rotation string `yaml:"rotation"`
 	Compress bool   `yaml:"compress"`
-	MaxAge   int    `yaml:"max_age"`    // 日志保留天数
+	MaxAge   int    `yaml:"max_age"` // Number of days to retain logs
 }
 
-// LoadConfig 加载配置文件并支持环境变量覆盖
+// LoadConfig loads configuration file and supports environment variable overrides
 func LoadConfig(path string) (*Config, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("读取配置文件失败: %v", err)
+		return nil, fmt.Errorf("failed to read configuration file: %v", err)
 	}
 
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("解析配置文件失败: %v", err)
+		return nil, fmt.Errorf("failed to parse configuration file: %v", err)
 	}
 
-	// 从环境变量加载敏感信息（如果存在）
+	// Load sensitive information from environment variables (if exists)
 	if token := os.Getenv("GITOLITE_GERRIT_API_TOKEN"); token != "" {
 		config.GerritAPIToken = token
 	}
@@ -51,7 +53,7 @@ func LoadConfig(path string) (*Config, error) {
 		config.GerritUser = user
 	}
 
-	// 验证必要配置
+	// Validate required configuration
 	if err := validateConfig(&config); err != nil {
 		return nil, err
 	}
@@ -59,24 +61,24 @@ func LoadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-// 验证配置是否完整有效
+// validateConfig verifies if the configuration is complete and valid
 func validateConfig(config *Config) error {
 	if config.RepoBase == "" {
-		return fmt.Errorf("缺少必要配置: repo_base")
+		return fmt.Errorf("missing required configuration: repo_base")
 	}
 	if config.GerritURL == "" {
-		return fmt.Errorf("缺少必要配置: gerrit_url")
+		return fmt.Errorf("missing required configuration: gerrit_url")
 	}
 	if config.GerritUser == "" {
-		return fmt.Errorf("缺少必要配置: gerrit_user")
+		return fmt.Errorf("missing required configuration: gerrit_user")
 	}
 	if config.GerritAPIToken == "" {
-		return fmt.Errorf("缺少必要配置: gerrit_api_token")
+		return fmt.Errorf("missing required configuration: gerrit_api_token")
 	}
 	if config.AuthorizedKeys == "" {
-		return fmt.Errorf("缺少必要配置: authorized_keys")
+		return fmt.Errorf("missing required configuration: authorized_keys")
 	}
-	// 设置默认值
+	// Set default values
 	if config.AccessConfig == "" {
 		config.AccessConfig = "/home/git/.gitolite/conf/gitolite.conf"
 	}

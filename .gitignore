@@ -1,0 +1,19 @@
+# 依赖目录
+/vendor/
+
+# IDE文件
+.idea/
+.trae/
+.repo/
+.vscode/
+*.swp
+*.swo
+
+# 测试覆盖率
+coverage.txt
+*.out
+
+# 临时文件
+*.tmp
+*.log
+.DS_Store

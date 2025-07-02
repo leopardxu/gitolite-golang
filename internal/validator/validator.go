@@ -6,38 +6,38 @@ import (
 	"strings"
 )
 
-// ValidateRepoName 验证仓库名称，防止路径遍历攻击
+// ValidateRepoName validates repository name to prevent path traversal attacks
 func ValidateRepoName(repo string) error {
-	// 检查是否包含路径遍历尝试
+	// Check for path traversal attempts
 	if strings.Contains(repo, "..") {
-		return errors.New("仓库名称包含非法字符序列 '..'")
+		return errors.New("repository name contains illegal character sequence '..'")
 	}
 
-	// 注意：不再检查是否是绝对路径，因为我们现在支持简化路径格式
-	// 在SSH协议处理中已经将绝对路径转换为相对路径
+	// Note: We no longer check if it's an absolute path because we now support simplified path format
+	// The SSH protocol handler has already converted absolute paths to relative paths
 
-	// 检查是否包含特殊字符
-	invalidChars := []string{"\\", ";", "&", "|", ">", "<", "*", "?", "`", "$", "!", "#"}
+	// Check for special characters
+	invalidChars := []string{"\\", ";", "&", "|", ">", "<", "*", "?", "`", "$", "!", "#", "'"} // Added single quote to prevent command injection
 	for _, char := range invalidChars {
 		if strings.Contains(repo, char) {
-			return errors.New("仓库名称包含非法字符: " + char)
+			return errors.New("repository name contains illegal character: " + char)
 		}
 	}
 
 	return nil
 }
 
-// ValidatePath 确保路径安全，防止目录遍历
+// ValidatePath ensures path safety to prevent directory traversal
 func ValidatePath(basePath, relativePath string) (string, error) {
-	// 构建完整路径
+	// Build full path
 	fullPath := filepath.Join(basePath, relativePath)
 
-	// 规范化路径
+	// Normalize path
 	fullPath = filepath.Clean(fullPath)
 
-	// 确保结果路径仍在基础路径下
+	// Ensure the resulting path is still under the base path
 	if !strings.HasPrefix(fullPath, basePath) {
-		return "", errors.New("路径超出了允许的范围")
+		return "", errors.New("path is outside the allowed scope")
 	}
 
 	return fullPath, nil

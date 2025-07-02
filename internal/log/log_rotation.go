@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// RotateLog 按天或周分割日志文件
+// RotateLog rotates log file by day or week
 func RotateLog(logPath string, rotation string) error {
 	now := time.Now()
 	var newLogPath string

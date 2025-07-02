@@ -24,7 +24,13 @@
    - 自动为新仓库安装钩子
    - 可自定义钩子行为
 
-5. **日志系统**
+5. **镜像复制功能**
+   - 支持将仓库镜像到多个远程服务器
+   - 按需或定时自动推送更新
+   - 支持同步或异步推送模式
+   - 灵活的仓库过滤配置
+
+6. **日志系统**
    - 支持日志级别配置
    - 日志轮转功能（按日或按周）
    - 旧日志压缩和自动清理
@@ -54,6 +60,21 @@ authorized_keys: /home/git/.ssh/authorized_keys
 # 权限和钩子配置
 access_config: /home/git/.gitolite/conf/gitolite.conf
 hooks_dir: /home/git/.gitolite/hooks
+
+# 镜像复制配置
+mirror:
+  enabled: true                # 是否启用镜像功能
+  schedule: "@hourly"          # 定时推送频率 (cron 表达式)
+  targets:                     # 镜像目标列表
+    - name: "backup-server"    # 目标名称
+      url: "git@backup-server:repos/" # 目标 URL
+      enabled: true            # 是否启用此目标
+      async: false             # 是否异步推送
+      timeout: 300             # 推送超时时间(秒)
+      all_repos: false         # 是否镜像所有仓库
+      repos:                   # 需要镜像的仓库列表
+        - "project1"           # 精确匹配
+        - "project2/*"         # 通配符匹配
 
 # 日志配置
 log:
@@ -112,3 +133,33 @@ repo project.*
 ### 日志管理
 
 系统支持日志轮转和压缩功能，可通过配置文件调整日志级别、轮转周期和保留时间。
+
+### 镜像复制
+
+系统支持将仓库镜像到多个远程服务器，可以按需或定时自动推送更新。
+
+#### 配置镜像
+
+在配置文件中添加 `mirror` 部分，设置镜像目标和推送策略。
+
+#### 手动触发镜像
+
+使用 `mirror-push` 工具手动触发镜像推送：
+
+```bash
+# 镜像单个仓库
+./mirror-push -repo project1
+
+# 镜像所有仓库
+./mirror-push -all
+
+# 指定镜像目标
+./mirror-push -repo project1 -target backup-server
+
+# 异步推送
+./mirror-push -repo project1 -async
+```
+
+#### 定时镜像
+
+在配置文件中设置 `mirror.schedule` 字段，使用 cron 表达式定义推送频率。系统在守护模式下会按照设定的时间自动执行镜像推送。

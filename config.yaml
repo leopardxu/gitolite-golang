@@ -13,6 +13,29 @@ authorized_keys: /home/git/.ssh/authorized_keys
 access_config: /home/git/.gitolite/conf/gitolite.conf
 hooks_dir: /home/git/.gitolite/hooks
 
+# 镜像配置
+mirror:
+  enabled: true  # 是否启用镜像功能
+  schedule: "@hourly"  # 定时镜像调度（Cron表达式，@hourly表示每小时执行一次）
+  targets:
+    - name: backup-server  # 镜像目标名称
+      url: ssh://git@backup-server.example.com/git-mirror/  # 镜像服务器URL
+      enabled: true  # 是否启用此镜像目标
+      async: true    # 是否异步推送（不阻塞主操作）
+      timeout: 300   # 推送超时时间（秒）
+      all_repos: false  # 是否镜像所有仓库
+      repos:  # 需要镜像的仓库列表（如果all_repos为false）
+        - project1
+        - project2
+        - group1/*  # 支持通配符
+    
+    - name: disaster-recovery
+      url: ssh://git@dr-server.example.com/repositories/
+      enabled: true
+      async: false  # 同步推送（等待推送完成）
+      timeout: 600
+      all_repos: true  # 镜像所有仓库
+
 # 日志配置
 log:
   path: /home/git/gitolite/gitolite-shell.log

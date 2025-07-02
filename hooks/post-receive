@@ -1,0 +1,20 @@
+#!/bin/sh
+# Gitolite-Golang mirror post-receive hook
+# This hook is automatically generated
+
+# Repository information
+repo_name="$GL_REPO"
+user_name="$GL_USER"
+
+# Log the execution
+echo "Post-receive hook executed for repository: $repo_name by user: $user_name"
+
+# The mirror push will be handled by the Gitolite-Golang shell
+# This hook is just a placeholder for any additional custom logic
+
+# Execute any secondary hooks if they exist
+if [ -x "$GL_HOOKS_DIR/post-receive.secondary" ]; then
+  "$GL_HOOKS_DIR/post-receive.secondary"
+fi
+
+exit 0

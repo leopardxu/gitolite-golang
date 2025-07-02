@@ -10,72 +10,90 @@ import (
 	"strings"
 
 	"gitolite-golang/internal/log"
+	"gitolite-golang/internal/validator"
 )
 
-// RefUpdate 表示Git引用更新信息
+// RefUpdate represents Git reference update information
 type RefUpdate struct {
-	RefName string // 引用名称
-	OldHash string // 旧的哈希值
-	NewHash string // 新的哈希值
+	RefName string // Reference name
+	OldHash string // Old hash value
+	NewHash string // New hash value
 }
 
-// ExecuteGitCommand 执行 Git 命令，增加安全验证
+// ExecuteGitCommand executes Git commands with enhanced security validation
 func ExecuteGitCommand(verb, repo, repoBase string) error {
-	// 处理仓库路径
-	// 确保repo不包含.git后缀，因为我们会在后面添加
+	// Process repository path
+	// Ensure repo doesn't contain .git suffix, as we'll add it later
 	repo = strings.TrimSuffix(repo, ".git")
-	// 如果是相对路径，添加repoBase前缀
+	
+	// Validate repository name to prevent command injection
+	if err := validator.ValidateRepoName(repo); err != nil {
+		return fmt.Errorf("invalid repository name: %w", err)
+	}
+	
+	// If it's a relative path, add repoBase prefix
 	repoPath := filepath.Join(repoBase, repo+".git")
 
-	// 处理初始化仓库的命令
+	// Handle repository initialization command
 	if verb == "init" {
-		// 创建仓库目录
+		// Create repository directory
 		if err := os.MkdirAll(repoPath, 0755); err != nil {
-			return fmt.Errorf("创建仓库目录失败: %v", err)
+			return fmt.Errorf("failed to create repository directory: %v", err)
 		}
 
-		// 初始化裸仓库
+		// Initialize bare repository
 		cmd := exec.Command("git", "init", "--bare")
 		cmd.Dir = repoPath
 		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("初始化仓库失败: %v, 输出: %s", err, output)
+			return fmt.Errorf("failed to initialize repository: %v, output: %s", err, output)
 		}
 
-		// 设置默认分支为 stable
+		// Set default branch to stable
 		cmd = exec.Command("git", "symbolic-ref", "HEAD", "refs/heads/stable")
 		cmd.Dir = repoPath
 		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("设置默认分支失败: %v, 输出: %s", err, output)
+			return fmt.Errorf("failed to set default branch: %v, output: %s", err, output)
 		}
 
 		return nil
 	}
-	// 验证仓库名称 - 允许包含子目录的仓库路径
-	// 注意：这里我们允许仓库名称包含斜杠，以支持子目录结构
-	// 例如：ffmpeg_repo/ffmpeg
-	if strings.Contains(repo, "../") || strings.Contains(repo, "./") {
-		return fmt.Errorf("无效的仓库名称: 包含不允许的路径导航符号")
+	
+	// Validate repository path using the validator
+	validatedPath, err := validator.ValidatePath(repoBase, repo+".git")
+	if err != nil {
+		return fmt.Errorf("invalid repository path: %w", err)
 	}
+	repoPath = validatedPath
 
-	// 记录仓库路径信息
-	log.Log(log.INFO, fmt.Sprintf("处理仓库: %s, 完整路径: %s", repo, repoPath))
+	// Log repository path information
+	log.Log(log.INFO, fmt.Sprintf("Processing repository: %s, full path: %s", repo, repoPath))
 
-	// 检查仓库是否存在，如果不存在且是推送操作，则初始化仓库
+	// Check if repository exists, if not and it's a push operation, initialize repository
 	if verb == "git-receive-pack" {
 		if err := ensureRepoExists(repoPath); err != nil {
-			return fmt.Errorf("确保仓库存在失败: %v", err)
+			return fmt.Errorf("failed to ensure repository exists: %v", err)
 		}
 	} else if _, err := os.Stat(repoPath); os.IsNotExist(err) {
-		return fmt.Errorf("仓库不存在: %s", repo)
+		return fmt.Errorf("repository does not exist: %s", repo)
 	}
 
-	// 构建 Git 命令
-	// 使用仓库路径而不是仓库名称，确保支持子目录结构
-	log.Log(log.INFO, fmt.Sprintf("执行Git命令: %s 于仓库: %s", verb, repoPath))
-	gitCommand := fmt.Sprintf("%s '%s'", verb, repoPath)
-
-	// 执行命令
-	cmd := exec.Command("sh", "-c", gitCommand)
+	// Build Git command
+	// Use repository path instead of repository name to ensure support for subdirectory structure
+	log.Log(log.INFO, fmt.Sprintf("Executing Git command: %s on repository: %s", verb, repoPath))
+	
+	// Use a more secure approach to execute git commands
+	var cmd *exec.Cmd
+	switch verb {
+	case "git-upload-pack":
+		cmd = exec.Command("git", "upload-pack", repoPath)
+	case "git-receive-pack":
+		cmd = exec.Command("git", "receive-pack", repoPath)
+	case "git-upload-archive":
+		cmd = exec.Command("git", "upload-archive", repoPath)
+	default:
+		return fmt.Errorf("unsupported git command: %s", verb)
+	}
+	
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -83,51 +101,49 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 	return cmd.Run()
 }
 
-// ensureRepoExists 确保仓库存在，如不存在则初始化
+// ensureRepoExists ensures repository exists, initializes if not
 func ensureRepoExists(repoPath string) error {
-	// 检查仓库是否已存在
+	// Check if repository already exists
 	if _, err := os.Stat(repoPath); err == nil {
-		return nil // 仓库已存在
+		return nil // Repository already exists
 	}
 
-	// 创建仓库目录
+	// Create repository directory
 	if err := os.MkdirAll(filepath.Dir(repoPath), 0755); err != nil {
-		return fmt.Errorf("创建仓库目录失败: %v", err)
+		return fmt.Errorf("failed to create repository directory: %v", err)
 	}
 
-	// 初始化裸仓库
+	// Initialize bare repository
 	cmd := exec.Command("git", "init", "--bare", repoPath)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("初始化仓库失败: %v", err)
+		return fmt.Errorf("failed to initialize repository: %v", err)
 	}
 
-	log.Log(log.INFO, fmt.Sprintf("成功初始化新仓库: %s", repoPath))
+	log.Log(log.INFO, fmt.Sprintf("Successfully initialized new repository: %s", repoPath))
 	return nil
 }
 
 func InitBareRepository(repoPath string) error {
-	// 修正：直接在仓库路径下执行命令
+	// Fix: Execute command directly in the repository path
 	cmd := exec.Command("git", "init", "--bare")
-	cmd.Dir = repoPath // 而不是 filepath.Dir(repoPath)
+	cmd.Dir = repoPath // Instead of filepath.Dir(repoPath)
 	return cmd.Run()
 }
 
-// SyncRepository 执行仓库同步操作
+// SyncRepository performs repository synchronization
 func SyncRepository(repoPath string, gerritRemoteURL string, repoBase string) error {
-	// 获取仓库名称
-	log.Log(log.INFO, fmt.Sprintf("开始对仓库 %s 进行全量同步", repoPath))
-	// repoName := filepath.Base(repoPath)
-	// repoName := strings.TrimSuffix(repoPath, ".git")
+	// Get repository name
+	log.Log(log.INFO, fmt.Sprintf("Starting full synchronization for repository %s", repoPath))
 
-	// 检查是否已经有 gerrit 远程仓库
+	// Check if gerrit remote repository already exists
 	checkCmd := exec.Command("git", "remote")
 	checkCmd.Dir = repoPath
 	var out bytes.Buffer
 	checkCmd.Stdout = &out
 	if err := checkCmd.Run(); err != nil {
-		log.Log(log.WARN, fmt.Sprintf("检查远程仓库失败: %v", err))
+		log.Log(log.WARN, fmt.Sprintf("Failed to check remote repositories: %v", err))
 	} else {
-		// 检查输出中是否包含 gerrit
+		// Check if output contains gerrit
 		hasGerrit := false
 		scanner := bufio.NewScanner(&out)
 		for scanner.Scan() {
@@ -137,49 +153,50 @@ func SyncRepository(repoPath string, gerritRemoteURL string, repoBase string) er
 			}
 		}
 
-		// 如果没有 gerrit 远程仓库，则添加
+		// If gerrit remote repository doesn't exist, add it
 		if !hasGerrit {
-			log.Log(log.INFO, fmt.Sprintf("为仓库 %s 添加 gerrit 远程仓库", repoPath))
-			remoteURL := fmt.Sprintf("%s%s", gerritRemoteURL, strings.TrimPrefix(repoPath, repoBase))
+			log.Log(log.INFO, fmt.Sprintf("Adding gerrit remote repository for %s", repoPath))
+			// Sanitize the repository path to prevent command injection
+			sanitizedRepoPath := strings.ReplaceAll(strings.TrimPrefix(repoPath, repoBase), "'", "")
+			remoteURL := fmt.Sprintf("%s%s", gerritRemoteURL, sanitizedRepoPath)
 			addCmd := exec.Command("git", "remote", "add", "gerrit", remoteURL)
 			addCmd.Dir = repoPath
 			if err := addCmd.Run(); err != nil {
-				log.Log(log.ERROR, fmt.Sprintf("添加 gerrit 远程仓库失败: %v", err))
-				// 继续执行，不返回错误
+				log.Log(log.ERROR, fmt.Sprintf("Failed to add gerrit remote repository: %v", err))
+				// Continue execution, don't return error
 			} else {
-				log.Log(log.INFO, fmt.Sprintf("成功添加远程仓库: %s", remoteURL))
+				log.Log(log.INFO, fmt.Sprintf("Successfully added remote repository: %s", remoteURL))
 			}
 		}
 	}
 
-	// 执行远程更新
+	// Perform remote update
 	cmd := exec.Command("git", "fetch", "gerrit", "--tags", "+refs/heads/*:refs/heads/*")
 	cmd.Dir = repoPath
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("执行git fetch失败: %w", err)
+		return fmt.Errorf("failed to execute git fetch: %w", err)
 	}
 
 	cmd = exec.Command("git", "gc")
 	cmd.Dir = repoPath
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("执行git gc失败: %w", err)
+		return fmt.Errorf("failed to execute git gc: %w", err)
 	}
 
 	return nil
 }
 
-// GetUpdatedRefs 获取仓库中最近更新的引用
+// GetUpdatedRefs gets recently updated references in the repository
 func GetUpdatedRefs(repoPath string) ([]RefUpdate, error) {
-	// 首先需要导入bytes包
 	var out bytes.Buffer
 
-	// 获取当前所有引用
+	// Get all current references
 	showRefCmd := exec.Command("git", "show-ref")
 	showRefCmd.Dir = repoPath
 	showRefCmd.Stdout = &out
 
 	if err := showRefCmd.Run(); err != nil {
-		return nil, fmt.Errorf("执行git show-ref失败: %w", err)
+		return nil, fmt.Errorf("failed to execute git show-ref: %w", err)
 	}
 
 	currentRefs := make(map[string]string)
@@ -194,25 +211,25 @@ func GetUpdatedRefs(repoPath string) ([]RefUpdate, error) {
 		}
 	}
 
-	// 获取最近的引用日志
+	// Get recent reflog
 	out.Reset()
 	reflogCmd := exec.Command("git", "reflog", "--all", "--format=%H %gd %gs", "-n", "20")
 	reflogCmd.Dir = repoPath
 	reflogCmd.Stdout = &out
 
 	if err := reflogCmd.Run(); err != nil {
-		// 如果reflog命令失败，可能是新仓库，返回空结果
+		// If reflog command fails, it might be a new repository, return empty result
 		return []RefUpdate{}, nil
 	}
 
-	// 解析reflog输出，提取引用更新信息
+	// Parse reflog output, extract reference update information
 	var updates []RefUpdate
 	processedRefs := make(map[string]bool)
 
 	scanner = bufio.NewScanner(&out)
 	for scanner.Scan() {
 		line := scanner.Text()
-		// 格式: <hash> <refname> <message>
+		// Format: <hash> <refname> <message>
 		parts := strings.SplitN(line, " ", 3)
 		if len(parts) < 3 {
 			continue
@@ -222,20 +239,20 @@ func GetUpdatedRefs(repoPath string) ([]RefUpdate, error) {
 		refNameRaw := parts[1]
 		message := parts[2]
 
-		// 从reflog引用名提取实际引用名
-		// 例如: refs/heads/master@{0} -> refs/heads/master
+		// Extract actual reference name from reflog reference name
+		// Example: refs/heads/master@{0} -> refs/heads/master
 		refName := strings.Split(refNameRaw, "@")[0]
 
-		// 避免处理重复的引用
+		// Avoid processing duplicate references
 		if processedRefs[refName] {
 			continue
 		}
 
-		// 尝试从消息中提取旧哈希值
-		// 格式通常是: "update by push" 或 "commit: <message>"
+		// Try to extract old hash value from message
+		// Format is usually: "update by push" or "commit: <message>"
 		oldHash := ""
 		if strings.Contains(message, "update by push") || strings.Contains(message, "commit:") {
-			// 获取前一个引用的哈希值
+			// Get hash of previous reference
 			oldHashCmd := exec.Command("git", "rev-parse", refName+"@{1}")
 			oldHashCmd.Dir = repoPath
 			oldHashBytes, err := oldHashCmd.Output()
@@ -244,15 +261,15 @@ func GetUpdatedRefs(repoPath string) ([]RefUpdate, error) {
 			}
 		}
 
-		// 如果无法从reflog获取旧哈希，使用空哈希
+		// If unable to get old hash from reflog, use empty hash
 		if oldHash == "" {
 			oldHash = "0000000000000000000000000000000000000000"
 		}
 
-		// 记录此引用已处理
+		// Mark this reference as processed
 		processedRefs[refName] = true
 
-		// 添加到更新列表
+		// Add to update list
 		updates = append(updates, RefUpdate{
 			RefName: refName,
 			OldHash: oldHash,
@@ -260,7 +277,7 @@ func GetUpdatedRefs(repoPath string) ([]RefUpdate, error) {
 		})
 	}
 
-	// 如果没有找到任何更新，返回空列表
+	// If no updates found, return empty list
 	if len(updates) == 0 {
 		return []RefUpdate{}, nil
 	}

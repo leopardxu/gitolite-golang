@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// CompressLog 压缩日志文件
+// CompressLog compresses log file
 func CompressLog(logPath string) error {
 	file, err := os.Open(logPath)
 	if err != nil {
