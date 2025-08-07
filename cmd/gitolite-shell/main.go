@@ -10,6 +10,7 @@ import (
 	"strings"
 	sync "sync" // Standard library sync package
 
+	"gitolite-golang/internal/audit"
 	"gitolite-golang/internal/config"
 	"gitolite-golang/internal/gerrit"
 	"gitolite-golang/internal/git"
@@ -24,6 +25,13 @@ func main() {
 	daemonMode := flag.Bool("daemon", false, "Run synchronization task in daemon mode")
 	configPath := flag.String("config", "/home/cixtech/.gitolite/config.yaml", "Configuration file path")
 	flag.Parse()
+
+	// Get remaining arguments (user name if provided)
+	args := flag.Args()
+	var glUser string
+	if len(args) > 0 {
+		glUser = args[0]
+	}
 
 	// Initialize configuration and logging
 	cfg, err := initConfigAndLogging(*configPath)
@@ -42,7 +50,7 @@ func main() {
 	case *daemonMode:
 		runDaemonMode(cfg)
 	default:
-		if err := runNormalMode(cfg); err != nil {
+		if err := runNormalMode(cfg, glUser); err != nil {
 			log.Log(log.ERROR, err.Error())
 			os.Exit(1)
 		}
@@ -136,7 +144,10 @@ func runDaemonMode(cfg *config.Config) {
 }
 
 // Normal mode processing
-func runNormalMode(cfg *config.Config) error {
+func runNormalMode(cfg *config.Config, glUser string) error {
+	// Initialize audit logger
+	auditLogger := audit.NewAuditLogger(cfg.Audit.LogPath, cfg.Audit.Enabled)
+
 	// 1. Parse SSH original command
 	sshCommand := os.Getenv("SSH_ORIGINAL_COMMAND")
 	if sshCommand == "" {
@@ -175,46 +186,71 @@ func runNormalMode(cfg *config.Config) error {
 	// Log the processed repository path
 	log.Log(log.INFO, fmt.Sprintf("Processed repository path: %s", repo))
 
-	// Get user information, prioritize GL_USER, if not set try SSH_USER or USER
-	user := os.Getenv("GL_USER")
-	if user == "" {
-		user = os.Getenv("SSH_USER")
+	// Get user information, prioritize command line argument, then GL_USER, then SSH_USER or USER
+	var user string
+	if glUser != "" {
+		user = glUser
+		log.Log(log.INFO, fmt.Sprintf("Using user from command line argument: %s", user))
+	} else {
+		user = os.Getenv("GL_USER")
 		if user == "" {
-			user = os.Getenv("USER")
+			user = os.Getenv("SSH_USER")
 			if user == "" {
-				return fmt.Errorf("unable to determine user identity, GL_USER, SSH_USER and USER environment variables are all not set")
+				user = os.Getenv("USER")
+				if user == "" {
+					return fmt.Errorf("unable to determine user identity, no command line argument provided and GL_USER, SSH_USER and USER environment variables are all not set")
+				}
 			}
+			log.Log(log.WARN, fmt.Sprintf("GL_USER not set, using fallback user: %s", user))
 		}
-		log.Log(log.WARN, fmt.Sprintf("GL_USER not set, using fallback user: %s", user))
 	}
 
+	// Collect access information for audit
+	accessInfo := audit.CollectAccessInfo(user, repo, audit.GetOperationType(verb), sshCommand)
+
 	// 2. Process special commands
+	var err error
 	switch verb {
 	case "init":
-		return handleRepoInit(cfg, user, repo)
+		err = handleRepoInit(cfg, user, repo)
 	case "git-upload-pack", "git-receive-pack":
 		// git-receive-pack command handles both normal commits and tag operations
-		return handleGitOperation(cfg, user, repo, verb)
+		err = handleGitOperation(cfg, user, repo, verb)
 	case "git-upload-archive":
-		return handleGitArchive(cfg, user, repo)
+		err = handleGitArchive(cfg, user, repo)
 	case "info":
-		return handleInfo(cfg, user, repo)
+		err = handleInfo(cfg, user, repo)
 	case "access":
-		return handleAccess(cfg, user, repo)
+		err = handleAccess(cfg, user, repo)
 	case "git-config":
-		return handleGitConfig(cfg, user, repo)
+		err = handleGitConfig(cfg, user, repo)
 	case "perms":
-		return handlePerms(cfg, user, repo)
+		err = handlePerms(cfg, user, repo)
 	case "gerrit-replication":
-		return handleGerritReplication(cfg, user, repo)
+		err = handleGerritReplication(cfg, user, repo)
 	default:
 		// Check if it's a mkdir command, provide more specific error message
 		if strings.Contains(verb, "mkdir") {
 			log.Log(log.ERROR, fmt.Sprintf("Unsupported Git command: %s, should use repo_base as the base path", verb))
-			return fmt.Errorf("direct execution of mkdir command is not supported, please use git-receive-pack or git-upload-pack command")
+			err = fmt.Errorf("direct execution of mkdir command is not supported, please use git-receive-pack or git-upload-pack command")
+		} else {
+			err = fmt.Errorf("unsupported Git command: %s", verb)
 		}
-		return fmt.Errorf("unsupported Git command: %s", verb)
 	}
+
+	// Update access result and log audit information
+	if err != nil {
+		accessInfo.UpdateResult(false, err.Error())
+	} else {
+		accessInfo.UpdateResult(true, "")
+	}
+
+	// Log access information if console output is enabled
+	if cfg.Audit.ConsoleOut {
+		auditLogger.LogAccess(accessInfo)
+	}
+
+	return err
 }
 
 // Handle Gerrit replication synchronization task

@@ -21,6 +21,7 @@ type Config struct {
 	HooksDir        string              `yaml:"hooks_dir"`     // Hook scripts directory
 	Mirror          mirror.MirrorConfig `yaml:"mirror"`        // Mirror configuration
 	Log             LogConfig           `yaml:"log"`
+	Audit           AuditConfig         `yaml:"audit"` // Audit configuration
 }
 
 // LogConfig log configuration
@@ -30,6 +31,13 @@ type LogConfig struct {
 	Rotation string `yaml:"rotation"`
 	Compress bool   `yaml:"compress"`
 	MaxAge   int    `yaml:"max_age"` // Number of days to retain logs
+}
+
+// AuditConfig audit configuration
+type AuditConfig struct {
+	Enabled    bool   `yaml:"enabled"`     // Enable audit logging
+	LogPath    string `yaml:"log_path"`    // Audit log file path
+	ConsoleOut bool   `yaml:"console_out"` // Output to console
 }
 
 // LoadConfig loads configuration file and supports environment variable overrides

@@ -101,11 +101,31 @@ func CheckAccess(gerritURL, username, repo, gerritUser, gerritToken string) (boo
 	}
 
 	// Check if access permission exists
-	// This needs to be adjusted according to the actual return format of the Gerrit API
 	if accessInfo == nil || len(accessInfo) == 0 {
 		return false, nil
 	}
 
-	// Simple judgment: if a non-empty result is returned and the status code is 200, consider having permission
+	// Check local permissions for the specific user
+	if local, ok := accessInfo["local"].(map[string]interface{}); ok {
+		// Check refs/* permissions
+		if refs, ok := local["refs/*"].(map[string]interface{}); ok {
+			if permissions, ok := refs["permissions"].(map[string]interface{}); ok {
+				if read, ok := permissions["read"].(map[string]interface{}); ok {
+					if rules, ok := read["rules"].(map[string]interface{}); ok {
+						// Check if user has explicit DENY rule
+						userKey := fmt.Sprintf("user:%s", username)
+						if userRule, ok := rules[userKey].(map[string]interface{}); ok {
+							if action, ok := userRule["action"].(string); ok && action == "DENY" {
+								log.Log(log.INFO, fmt.Sprintf("User %s has explicit DENY rule for repository %s", username, repo))
+								return false, nil
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// If no explicit DENY rule found and status code is 200, consider having permission
 	return resp.StatusCode == 200, nil
 }
