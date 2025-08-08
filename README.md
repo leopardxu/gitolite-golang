@@ -47,6 +47,13 @@ sudo mv gitolite-shell /usr/bin/
 ### 2. 配置
 
 配置文件路径: /home/git/.gitolite/config.yaml
+···bash
+export GITOLITE_CONFIG_PATH=/home/git/.gitolite/config.yaml
+#支持
+-config /home/git/.gitolite/config.yaml
+#默认配置文件路径
+default: $HOME/.gitolite/config.yaml
+···
 
 ```yaml
 # 基础配置

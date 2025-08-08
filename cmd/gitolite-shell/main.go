@@ -23,7 +23,12 @@ func main() {
 	// Parse command line arguments
 	syncMode := flag.Bool("sync", false, "Only run key synchronization task")
 	daemonMode := flag.Bool("daemon", false, "Run synchronization task in daemon mode")
-	configPath := flag.String("config", "/home/cixtech/.gitolite/config.yaml", "Configuration file path")
+	// 从环境变量获取配置文件路径,如果未设置则使用默认值
+	defaultConfigPath := os.Getenv("GITOLITE_CONFIG_PATH")
+	if defaultConfigPath == "" {
+		defaultConfigPath = filepath.Join(os.Getenv("HOME"), ".gitolite", "config.yaml")
+	}
+	configPath := flag.String("config", defaultConfigPath, "Configuration file path")
 	flag.Parse()
 
 	// Get remaining arguments (user name if provided)
@@ -52,6 +57,12 @@ func main() {
 	default:
 		if err := runNormalMode(cfg, glUser); err != nil {
 			log.Log(log.ERROR, err.Error())
+			// For Git protocol errors, send proper error message to client
+			if strings.Contains(err.Error(), "has no permission") {
+				fmt.Fprintf(os.Stderr, "fatal: access denied or repository not found\n")
+			} else {
+				fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+			}
 			os.Exit(1)
 		}
 	}
@@ -193,15 +204,20 @@ func runNormalMode(cfg *config.Config, glUser string) error {
 		log.Log(log.INFO, fmt.Sprintf("Using user from command line argument: %s", user))
 	} else {
 		user = os.Getenv("GL_USER")
+		log.Log(log.INFO, fmt.Sprintf("GL_USER environment variable: '%s'", user))
 		if user == "" {
 			user = os.Getenv("SSH_USER")
+			log.Log(log.INFO, fmt.Sprintf("SSH_USER environment variable: '%s'", user))
 			if user == "" {
 				user = os.Getenv("USER")
+				log.Log(log.INFO, fmt.Sprintf("USER environment variable: '%s'", user))
 				if user == "" {
 					return fmt.Errorf("unable to determine user identity, no command line argument provided and GL_USER, SSH_USER and USER environment variables are all not set")
 				}
 			}
 			log.Log(log.WARN, fmt.Sprintf("GL_USER not set, using fallback user: %s", user))
+		} else {
+			log.Log(log.INFO, fmt.Sprintf("Using user from GL_USER: %s", user))
 		}
 	}
 

@@ -75,21 +75,21 @@ func (al *AuditLogger) LogAccess(info *AccessInfo) {
 
 // printStructuredInfo 结构化输出访问信息到控制台
 func (al *AuditLogger) printStructuredInfo(info *AccessInfo) {
-	// 创建格式化的输出
-	fmt.Printf("\n=== Git Access Information ===\n")
-	fmt.Printf("Time:         %s\n", info.Timestamp.Format("2006-01-02 15:04:05"))
-	fmt.Printf("User:         %s\n", info.User)
-	fmt.Printf("Repository:   %s\n", info.Repository)
-	fmt.Printf("Operation:    %s\n", info.Operation)
-	fmt.Printf("Command:      %s\n", info.Command)
-	fmt.Printf("Client IP:    %s\n", info.ClientIP)
-	fmt.Printf("SSH Client:   %s\n", info.SSHClient)
-	fmt.Printf("Connection:   %s\n", info.ConnectionID)
-	fmt.Printf("Status:       %s\n", getStatusString(info.Success))
+	// 创建格式化的输出，输出到stderr避免干扰Git协议
+	fmt.Fprintf(os.Stderr, "\n=== Git Access Information ===\n")
+	fmt.Fprintf(os.Stderr, "Time:         %s\n", info.Timestamp.Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(os.Stderr, "User:         %s\n", info.User)
+	fmt.Fprintf(os.Stderr, "Repository:   %s\n", info.Repository)
+	fmt.Fprintf(os.Stderr, "Operation:    %s\n", info.Operation)
+	fmt.Fprintf(os.Stderr, "Command:      %s\n", info.Command)
+	fmt.Fprintf(os.Stderr, "Client IP:    %s\n", info.ClientIP)
+	fmt.Fprintf(os.Stderr, "SSH Client:   %s\n", info.SSHClient)
+	fmt.Fprintf(os.Stderr, "Connection:   %s\n", info.ConnectionID)
+	fmt.Fprintf(os.Stderr, "Status:       %s\n", getStatusString(info.Success))
 	if info.ErrorMessage != "" {
-		fmt.Printf("Error:        %s\n", info.ErrorMessage)
+		fmt.Fprintf(os.Stderr, "Error:        %s\n", info.ErrorMessage)
 	}
-	fmt.Printf("==============================\n\n")
+	fmt.Fprintf(os.Stderr, "==============================\n\n")
 }
 
 // writeToAuditLog 写入审计日志文件
