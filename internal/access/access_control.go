@@ -12,12 +12,12 @@ import (
 type PermissionType string
 
 const (
-	ReadPermission    PermissionType = "R"
-	WritePermission   PermissionType = "W"
-	PlusPermission    PermissionType = "+"
-	CreatePermission  PermissionType = "C"
-	DeletePermission  PermissionType = "D"
-	RewindPermission  PermissionType = "rewind"
+	ReadPermission     PermissionType = "R"
+	WritePermission    PermissionType = "W"
+	PlusPermission     PermissionType = "+"
+	CreatePermission   PermissionType = "C"
+	DeletePermission   PermissionType = "D"
+	RewindPermission   PermissionType = "rewind"
 	WildcardPermission PermissionType = "*"
 )
 

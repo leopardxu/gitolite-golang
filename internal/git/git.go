@@ -25,12 +25,12 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 	// Process repository path
 	// Ensure repo doesn't contain .git suffix, as we'll add it later
 	repo = strings.TrimSuffix(repo, ".git")
-	
+
 	// Validate repository name to prevent command injection
 	if err := validator.ValidateRepoName(repo); err != nil {
 		return fmt.Errorf("invalid repository name: %w", err)
 	}
-	
+
 	// If it's a relative path, add repoBase prefix
 	repoPath := filepath.Join(repoBase, repo+".git")
 
@@ -57,7 +57,7 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 
 		return nil
 	}
-	
+
 	// Validate repository path using the validator
 	validatedPath, err := validator.ValidatePath(repoBase, repo+".git")
 	if err != nil {
@@ -80,7 +80,7 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 	// Build Git command
 	// Use repository path instead of repository name to ensure support for subdirectory structure
 	log.Log(log.INFO, fmt.Sprintf("Executing Git command: %s on repository: %s", verb, repoPath))
-	
+
 	// Use a more secure approach to execute git commands
 	var cmd *exec.Cmd
 	switch verb {
@@ -93,7 +93,7 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 	default:
 		return fmt.Errorf("unsupported git command: %s", verb)
 	}
-	
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

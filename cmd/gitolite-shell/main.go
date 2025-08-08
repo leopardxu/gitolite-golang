@@ -227,23 +227,23 @@ func runNormalMode(cfg *config.Config, glUser string) error {
 	// 2. Process special commands
 	var err error
 	switch verb {
-	case "init":
-		err = handleRepoInit(cfg, user, repo)
+	// case "init":
+	// 	err = handleRepoInit(cfg, user, repo)
 	case "git-upload-pack", "git-receive-pack":
 		// git-receive-pack command handles both normal commits and tag operations
 		err = handleGitOperation(cfg, user, repo, verb)
-	case "git-upload-archive":
-		err = handleGitArchive(cfg, user, repo)
-	case "info":
-		err = handleInfo(cfg, user, repo)
-	case "access":
-		err = handleAccess(cfg, user, repo)
-	case "git-config":
-		err = handleGitConfig(cfg, user, repo)
-	case "perms":
-		err = handlePerms(cfg, user, repo)
-	case "gerrit-replication":
-		err = handleGerritReplication(cfg, user, repo)
+	// case "git-upload-archive":
+	// 	err = handleGitArchive(cfg, user, repo)
+	// case "info":
+	// 	err = handleInfo(cfg, user, repo)
+	// case "access":
+	// 	err = handleAccess(cfg, user, repo)
+	// case "git-config":
+	// 	err = handleGitConfig(cfg, user, repo)
+	// case "perms":
+	// 	err = handlePerms(cfg, user, repo)
+	// case "gerrit-replication":
+	// 	err = handleGerritReplication(cfg, user, repo)
 	default:
 		// Check if it's a mkdir command, provide more specific error message
 		if strings.Contains(verb, "mkdir") {

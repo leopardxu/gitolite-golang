@@ -14,19 +14,19 @@ import (
 
 // MirrorTarget represents a mirror target configuration
 type MirrorTarget struct {
-	Name     string `yaml:"name"`     // Name of the mirror target
-	URL      string `yaml:"url"`      // URL of the mirror target (e.g., ssh://git@mirror-server/path/to/repo.git)
-	Enabled  bool   `yaml:"enabled"`  // Whether this mirror target is enabled
-	Async    bool   `yaml:"async"`    // Whether to push asynchronously
-	Timeout  int    `yaml:"timeout"`  // Timeout in seconds for mirror push operation
-	AllRepos bool   `yaml:"all_repos"` // Whether to mirror all repositories
-	Repos    []string `yaml:"repos"`  // List of repositories to mirror (if all_repos is false)
+	Name     string   `yaml:"name"`      // Name of the mirror target
+	URL      string   `yaml:"url"`       // URL of the mirror target (e.g., ssh://git@mirror-server/path/to/repo.git)
+	Enabled  bool     `yaml:"enabled"`   // Whether this mirror target is enabled
+	Async    bool     `yaml:"async"`     // Whether to push asynchronously
+	Timeout  int      `yaml:"timeout"`   // Timeout in seconds for mirror push operation
+	AllRepos bool     `yaml:"all_repos"` // Whether to mirror all repositories
+	Repos    []string `yaml:"repos"`     // List of repositories to mirror (if all_repos is false)
 }
 
 // MirrorConfig represents the mirror configuration
 type MirrorConfig struct {
 	Enabled  bool           `yaml:"enabled"`  // Whether mirroring is enabled
-	Targets  []MirrorTarget `yaml:"targets"` // List of mirror targets
+	Targets  []MirrorTarget `yaml:"targets"`  // List of mirror targets
 	Schedule string         `yaml:"schedule"` // Cron schedule expression for automatic mirroring
 }
 
@@ -66,11 +66,11 @@ func PushToMirror(repoPath string, target MirrorTarget) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			log.Log(log.ERROR, fmt.Sprintf("Failed to push to mirror %s: %v, output: %s", 
+			log.Log(log.ERROR, fmt.Sprintf("Failed to push to mirror %s: %v, output: %s",
 				target.Name, err, out.String()))
 			return fmt.Errorf("mirror push failed: %w, output: %s", err, out.String())
 		}
-		log.Log(log.INFO, fmt.Sprintf("Successfully pushed to mirror %s, output: %s", 
+		log.Log(log.INFO, fmt.Sprintf("Successfully pushed to mirror %s, output: %s",
 			target.Name, out.String()))
 		return nil
 	case <-time.After(timeout):
@@ -124,7 +124,7 @@ func MirrorRepository(repoPath string, repoName string, config MirrorConfig, asy
 
 		// Check if this repository should be mirrored to this target
 		if !ShouldMirrorRepo(repoName, target) {
-			log.Log(log.INFO, fmt.Sprintf("Repository %s is not configured for mirroring to %s", 
+			log.Log(log.INFO, fmt.Sprintf("Repository %s is not configured for mirroring to %s",
 				repoName, target.Name))
 			continue
 		}

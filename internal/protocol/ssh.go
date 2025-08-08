@@ -86,13 +86,13 @@ func sanitizeRepoName(repo string) string {
 	// Remove any characters that could be used for command injection
 	dangerousChars := []string{"'", "`", ";", "&", "|", ">", "<", "$", "(", ")", "[", "]", "{", "}", "\\"}
 	result := repo
-	
+
 	for _, char := range dangerousChars {
 		result = strings.ReplaceAll(result, char, "")
 	}
-	
+
 	// Also remove any potential path traversal sequences
 	result = strings.ReplaceAll(result, "..", "")
-	
+
 	return result
 }
