@@ -431,30 +431,25 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 	// Remove possible .git suffix
 	repoBase := strings.TrimSuffix(repo, ".git")
 
-	// Only perform permission check for non-synchronization users
-	if user != "gerrit-replication" && user != "git" {
-		// Improved error handling, capture and log detailed API call errors
-		allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repoBase,
-			cfg.GerritUser, cfg.GerritAPIToken)
-		if err != nil {
-			// Log detailed error information to help diagnose problems
-			log.Log(log.ERROR, fmt.Sprintf("Gerrit API call failed: %v (URL: %s, User: %s, Repo: %s)",
-				err, cfg.GerritURL, user, repoBase))
+	// Check access permission (including whitelist check)
+	allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repoBase,
+		cfg.GerritUser, cfg.GerritAPIToken, cfg)
+	if err != nil {
+		// Log detailed error information to help diagnose problems
+		log.Log(log.ERROR, fmt.Sprintf("Gerrit API call failed: %v (URL: %s, User: %s, Repo: %s)",
+			err, cfg.GerritURL, user, repoBase))
 
-			// Check if the error contains specific strings, possibly a command line parameter error
-			errStr := err.Error()
-			if strings.Contains(errStr, "--account") {
-				log.Log(log.WARN, "Detected possible Gerrit API parameter error, please check configuration")
-				return fmt.Errorf("Gerrit API configuration error, please contact administrator")
-			}
+		// Check if the error contains specific strings, possibly a command line parameter error
+		errStr := err.Error()
+		if strings.Contains(errStr, "--account") {
+			log.Log(log.WARN, "Detected possible Gerrit API parameter error, please check configuration")
+			return fmt.Errorf("Gerrit API configuration error, please contact administrator")
+		}
 
-			return fmt.Errorf("Failed to check access permission: %w", err)
-		}
-		if !allowed {
-			return fmt.Errorf("User %s has no permission to access repository %s", user, repoBase)
-		}
-	} else {
-		log.Log(log.INFO, fmt.Sprintf("Synchronization user %s operating repository %s, skipping permission check", user, repoBase))
+		return fmt.Errorf("Failed to check access permission: %w", err)
+	}
+	if !allowed {
+		return fmt.Errorf("User %s has no permission to access repository %s", user, repoBase)
 	}
 
 	// Check if repository exists
@@ -479,7 +474,7 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 	}
 
 	// Execute Git command, passing repository name without .git suffix
-	err := git.ExecuteGitCommand(verb, repoBase, cfg.RepoBase)
+	err = git.ExecuteGitCommand(verb, repoBase, cfg.RepoBase)
 
 	// If it's a push operation, check if there are tag updates
 	if verb == "git-receive-pack" && err == nil {
@@ -521,7 +516,7 @@ func handleGitArchive(cfg *config.Config, user, repo string) error {
 	// Only perform permission check for non-synchronization users
 	if user != "gerrit-replication" && user != "git" {
 		allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repoBase,
-			cfg.GerritUser, cfg.GerritAPIToken)
+			cfg.GerritUser, cfg.GerritAPIToken, cfg)
 		if err != nil {
 			return fmt.Errorf("Failed to check archive permission: %w", err)
 		}
@@ -554,7 +549,7 @@ func handleInfo(cfg *config.Config, user, repo string) error {
 
 		// Check user's access permission for this repository
 		allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repo,
-			cfg.GerritUser, cfg.GerritAPIToken)
+			cfg.GerritUser, cfg.GerritAPIToken, cfg)
 		if err != nil {
 			return fmt.Errorf("Failed to check repository access permission: %w", err)
 		}
@@ -609,7 +604,7 @@ func handleInfo(cfg *config.Config, user, repo string) error {
 			for repo := range jobs {
 				// Check user's access permission for the repository
 				allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repo,
-					cfg.GerritUser, cfg.GerritAPIToken)
+					cfg.GerritUser, cfg.GerritAPIToken, cfg)
 				if err != nil {
 					log.Log(log.WARN, fmt.Sprintf("Failed to check repository %s access permission: %v", repo, err))
 					allowed = false
@@ -705,7 +700,7 @@ func handleAccess(cfg *config.Config, user, repo string) error {
 
 	// Check user's access permission for this repository
 	allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repoName,
-		cfg.GerritUser, cfg.GerritAPIToken)
+		cfg.GerritUser, cfg.GerritAPIToken, cfg)
 	if err != nil {
 		return fmt.Errorf("Failed to check repository access permission: %w", err)
 	}
@@ -793,7 +788,7 @@ func handleGitConfig(cfg *config.Config, user, repo string) error {
 
 	// Check user's access permission for this repository
 	allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repoName,
-		cfg.GerritUser, cfg.GerritAPIToken)
+		cfg.GerritUser, cfg.GerritAPIToken, cfg)
 	if err != nil {
 		return fmt.Errorf("Failed to check repository access permission: %w", err)
 	}
@@ -915,7 +910,7 @@ func handlePerms(cfg *config.Config, user, repo string) error {
 
 	// Check user's access permission for this repository
 	allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repoName,
-		cfg.GerritUser, cfg.GerritAPIToken)
+		cfg.GerritUser, cfg.GerritAPIToken, cfg)
 	if err != nil {
 		return fmt.Errorf("Failed to check repository access permission: %w", err)
 	}

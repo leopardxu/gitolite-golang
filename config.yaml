@@ -34,7 +34,7 @@ mirror:
 
 log:
   path: "****/gitolite/gitolite-shell.log"
-  level: INFO  # 可选值: INFO, WARN, ERROR
+  level: DEBUG  # 可选值: INFO, WARN, ERROR
   rotation: daily  # 日志轮转周期: daily 或 weekly
   compress: true   # 是否压缩旧日志
   max_age: 30      # 日志保留天数
@@ -42,3 +42,7 @@ audit:
   enabled: true  # 是否启用审计功能
   log_path: "****/gitolite/audit.log"  # 审计日志文件路径
   console_out: true  # 是否在控制台输出结构化访问信息
+whitelist:
+  users:  # 跳过权限检查的用户列表
+    - "gerrit-replication"
+    - "git"

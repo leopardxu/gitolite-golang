@@ -21,7 +21,8 @@ type Config struct {
 	HooksDir        string              `yaml:"hooks_dir"`     // Hook scripts directory
 	Mirror          mirror.MirrorConfig `yaml:"mirror"`        // Mirror configuration
 	Log             LogConfig           `yaml:"log"`
-	Audit           AuditConfig         `yaml:"audit"` // Audit configuration
+	Audit           AuditConfig         `yaml:"audit"`     // Audit configuration
+	Whitelist       WhitelistConfig     `yaml:"whitelist"` // Whitelist configuration
 }
 
 // LogConfig log configuration
@@ -38,6 +39,11 @@ type AuditConfig struct {
 	Enabled    bool   `yaml:"enabled"`     // Enable audit logging
 	LogPath    string `yaml:"log_path"`    // Audit log file path
 	ConsoleOut bool   `yaml:"console_out"` // Output to console
+}
+
+// WhitelistConfig whitelist configuration
+type WhitelistConfig struct {
+	Users []string `yaml:"users"` // List of whitelisted users who bypass permission checks
 }
 
 // LoadConfig loads configuration file and supports environment variable overrides
@@ -65,6 +71,9 @@ func LoadConfig(path string) (*Config, error) {
 	if err := validateConfig(&config); err != nil {
 		return nil, err
 	}
+
+	// Debug: print whitelist configuration
+	fmt.Printf("DEBUG: Loaded whitelist users: %v\n", config.Whitelist.Users)
 
 	return &config, nil
 }

@@ -3,6 +3,7 @@ package gerrit
 import (
 	"encoding/json"
 	"fmt"
+	"gitolite-golang/internal/config"
 	"gitolite-golang/internal/log"
 	"io"
 	"net/http"
@@ -44,11 +45,17 @@ type PermissionRule struct {
 }
 
 // CheckAccess checks if user has permission to access repository using Gerrit REST API
-func CheckAccess(gerritURL, username, repo, gerritUser, gerritToken string) (bool, error) {
+func CheckAccess(gerritURL, username, repo, gerritUser, gerritToken string, cfg *config.Config) (bool, error) {
 	// For specific users, directly return permission granted
 	log.Log(log.INFO, fmt.Sprintf("Checking access for user %s on repository %s", username, repo))
-	if username == "gerrit-replication" || username == "git" {
-		return true, nil
+
+	// Check if user is in whitelist
+	log.Log(log.INFO, fmt.Sprintf("Checking whitelist for user %s, whitelist users: %v", username, cfg.Whitelist.Users))
+	for _, whitelistUser := range cfg.Whitelist.Users {
+		if username == whitelistUser {
+			log.Log(log.INFO, fmt.Sprintf("User %s is in whitelist, granting access", username))
+			return true, nil
+		}
 	}
 
 	// Check if user has access to the project (simplified check without branch-specific logic)

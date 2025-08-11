@@ -15,10 +15,10 @@ import (
 // GerritPermissionChecker 优化版本的Gerrit权限检查器
 // 借鉴Python版本的设计思路，增加缓存和更好的API使用
 type GerritPermissionChecker struct {
-	gerritURL   string
-	adminToken  string
-	client      *http.Client
-	
+	gerritURL  string
+	adminToken string
+	client     *http.Client
+
 	// 缓存机制
 	userGroupsCache map[string][]string
 	repoAccessCache map[string][]AccessRule
@@ -27,23 +27,23 @@ type GerritPermissionChecker struct {
 
 // AccessRule 访问规则结构
 type AccessRule struct {
-	Ref        string   `json:"ref"`
-	Action     string   `json:"action"`     // ALLOW, DENY, BLOCK
-	Groups     []string `json:"groups"`
-	Users      []string `json:"users"`
-	Priority   int      `json:"priority"`
-	Project    string   `json:"project"`
+	Ref      string   `json:"ref"`
+	Action   string   `json:"action"` // ALLOW, DENY, BLOCK
+	Groups   []string `json:"groups"`
+	Users    []string `json:"users"`
+	Priority int      `json:"priority"`
+	Project  string   `json:"project"`
 }
 
 // AccessResponse Gerrit access API响应结构
 type AccessResponse struct {
 	Local        map[string]RefPermissions `json:"local"`
-	InheritsFrom *ProjectRef              `json:"inherits_from"`
+	InheritsFrom *ProjectRef               `json:"inherits_from"`
 }
 
 // RefPermissions 引用权限结构
 type RefPermissions struct {
-	Ref         string                 `json:"ref"`
+	Ref         string                `json:"ref"`
 	Permissions map[string]Permission `json:"permissions"`
 }
 
@@ -331,7 +331,7 @@ func (g *GerritPermissionChecker) getActionPriority(action string) int {
 func (g *GerritPermissionChecker) ClearCache() {
 	g.cacheMutex.Lock()
 	defer g.cacheMutex.Unlock()
-	
+
 	g.userGroupsCache = make(map[string][]string)
 	g.repoAccessCache = make(map[string][]AccessRule)
 }
@@ -340,7 +340,7 @@ func (g *GerritPermissionChecker) ClearCache() {
 func (g *GerritPermissionChecker) ClearUserCache(username string) {
 	g.cacheMutex.Lock()
 	defer g.cacheMutex.Unlock()
-	
+
 	delete(g.userGroupsCache, username)
 }
 
@@ -348,6 +348,6 @@ func (g *GerritPermissionChecker) ClearUserCache(username string) {
 func (g *GerritPermissionChecker) ClearRepoCache(repoName string) {
 	g.cacheMutex.Lock()
 	defer g.cacheMutex.Unlock()
-	
+
 	delete(g.repoAccessCache, repoName)
 }
