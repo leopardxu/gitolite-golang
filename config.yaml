@@ -1,15 +1,15 @@
 # Gitolite-Golang 配置文件
 
 # 基础配置
-repo_base: /home/cixtech/gitolite/repositories
-gerrit_url: https://codereviewqa.cixtech.com
-gerrit_user: "svc.swciuser"
-gerrit_remote_url: "ssh://svc.swciuser@codereviewqa.cixtech.com:29418"
-gerrit_api_token: "Er7Nc1Mb5c5keRhsWLjU35Kq1RP8cX0uMwZ5YX7u+Q"
-authorized_keys: /home/cixtech/.ssh/authorized_keys
+repo_base: ****/gitolite/repositories
+gerrit_url: "******"
+gerrit_user: "******"
+gerrit_remote_url: "******"
+gerrit_api_token: "******"
+authorized_keys: ****/.ssh/authorized_keys
 # 权限和钩子配置
-access_config: /home/cixtech/.gitolite/conf/gitolite.conf
-hooks_dir: /home/cixtech/.gitolite/hooks
+access_config: ****/.gitolite/conf/gitolite.conf
+hooks_dir: ****/.gitolite/hooks
 
 # 权限和钩子配置
 access_config: /******/.gitolite/conf/gitolite.conf
@@ -39,12 +39,12 @@ mirror:
       all_repos: true  # 镜像所有仓库
 
 log:
-  path: /home/cixtech/gitolite/gitolite-shell.log
+  path: ****/gitolite/gitolite-shell.log
   level: INFO  # 可选值: INFO, WARN, ERROR
   rotation: daily  # 日志轮转周期: daily 或 weekly
   compress: true   # 是否压缩旧日志
   max_age: 30      # 日志保留天数
 audit:
   enabled: true  # 是否启用审计功能
-  log_path: /home/cixtech/gitolite/audit.log  # 审计日志文件路径
+  log_path: ****/gitolite/audit.log  # 审计日志文件路径
   console_out: true  # 是否在控制台输出结构化访问信息

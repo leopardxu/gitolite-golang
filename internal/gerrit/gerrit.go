@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,13 @@ import (
 type Group struct {
 	Name string `json:"name"`
 }
+
+// 缓存相关变量（借鉴Python版本的缓存机制）
+var (
+	userGroupsCache = make(map[string][]string)
+	repoAccessCache = make(map[string][]PermissionRule)
+	cacheMutex      sync.RWMutex
+)
 
 // ProjectInfo represents Gerrit project information
 type ProjectInfo struct {
@@ -108,24 +116,91 @@ func getProjectInfo(gerritURL, gerritUser, gerritToken, projectName string) (*Pr
 }
 
 // getUserGroups gets all groups that the user belongs to (including nested groups)
+// 优化版本：添加缓存机制和嵌套组支持（借鉴Python版本）
 func getUserGroups(gerritURL, gerritUser, gerritToken, username string) ([]string, error) {
+	// 检查缓存
+	cacheMutex.RLock()
+	if groups, exists := userGroupsCache[username]; exists {
+		cacheMutex.RUnlock()
+		log.Log(log.DEBUG, fmt.Sprintf("Using cached groups for user %s", username))
+		return groups, nil
+	}
+	cacheMutex.RUnlock()
+
+	log.Log(log.DEBUG, fmt.Sprintf("Fetching groups for user %s", username))
+	
+	groups := make(map[string]bool)
+	visited := make(map[string]bool)
+
+	// 递归获取组及其父组（嵌套组支持）
+	var fetchNestedGroups func(groupName string) error
+	fetchNestedGroups = func(groupName string) error {
+		if visited[groupName] {
+			return nil
+		}
+		visited[groupName] = true
+
+		// 获取组的父组
+		url := fmt.Sprintf("%s/a/groups/%s/groups/", gerritURL, url.QueryEscape(groupName))
+		data, err := getGerritJSON(url, gerritUser, gerritToken)
+		if err != nil {
+			// 忽略获取父组失败的错误，继续处理
+			log.Log(log.DEBUG, fmt.Sprintf("Failed to get parent groups for %s: %v", groupName, err))
+			return nil
+		}
+
+		var parentGroups []Group
+		if err := json.Unmarshal([]byte(data), &parentGroups); err != nil {
+			log.Log(log.DEBUG, fmt.Sprintf("Failed to parse parent groups for %s: %v", groupName, err))
+			return nil
+		}
+
+		for _, parentGroup := range parentGroups {
+			groups[parentGroup.Name] = true
+			if err := fetchNestedGroups(parentGroup.Name); err != nil {
+				log.Log(log.DEBUG, fmt.Sprintf("Failed to fetch nested groups for %s: %v", parentGroup.Name, err))
+			}
+		}
+
+		return nil
+	}
+
+	// 获取用户直接所属组
 	url := fmt.Sprintf("%s/a/accounts/%s/groups", gerritURL, url.QueryEscape(username))
 	data, err := getGerritJSON(url, gerritUser, gerritToken)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user groups: %w", err)
 	}
 
-	var groups []Group
-	if err := json.Unmarshal([]byte(data), &groups); err != nil {
-		return nil, err
+	var userGroups []Group
+	if err := json.Unmarshal([]byte(data), &userGroups); err != nil {
+		return nil, fmt.Errorf("failed to parse user groups: %w", err)
 	}
 
-	groupNames := make([]string, len(groups))
-	for i, group := range groups {
-		groupNames[i] = group.Name
+	// 添加直接组和递归获取嵌套组
+	for _, group := range userGroups {
+		groups[group.Name] = true
+		if err := fetchNestedGroups(group.Name); err != nil {
+			log.Log(log.DEBUG, fmt.Sprintf("Failed to fetch nested groups for %s: %v", group.Name, err))
+		}
 	}
 
-	return groupNames, nil
+	// 添加内置组
+	groups["Registered Users"] = true
+
+	// 转换为切片
+	result := make([]string, 0, len(groups))
+	for group := range groups {
+		result = append(result, group)
+	}
+
+	// 缓存结果
+	cacheMutex.Lock()
+	userGroupsCache[username] = result
+	cacheMutex.Unlock()
+
+	log.Log(log.DEBUG, fmt.Sprintf("Found %d groups for user %s (including nested)", len(result), username))
+	return result, nil
 }
 
 // getProjectConfig gets the project.config content
@@ -281,8 +356,8 @@ func parseReadPermissions(configContent, projectName string) []PermissionRule {
 
 // getInheritedPermissions gets permissions from project and all its parent projects
 func getInheritedPermissions(gerritURL, gerritUser, gerritToken, projectName string) ([]PermissionRule, error) {
-	fmt.Printf("\n=== 获取继承权限 ===\n")
-	fmt.Printf("项目: %s\n", projectName)
+	log.Log(log.DEBUG, "=== 获取继承权限 ===")
+	log.Log(log.DEBUG, fmt.Sprintf("项目: %s", projectName))
 	
 	var allPermissions []PermissionRule
 	visited := make(map[string]bool)
@@ -291,20 +366,20 @@ func getInheritedPermissions(gerritURL, gerritUser, gerritToken, projectName str
 	// Traverse the inheritance chain
 	for currentProject != "" && !visited[currentProject] {
 		visited[currentProject] = true
-		fmt.Printf("正在处理项目: %s\n", currentProject)
+		log.Log(log.DEBUG, fmt.Sprintf("正在处理项目: %s", currentProject))
 
 		// Get project config
 		projectConfig, err := getProjectConfig(gerritURL, gerritUser, gerritToken, currentProject)
 		if err != nil {
 			log.Log(log.INFO, fmt.Sprintf("Failed to get config for project %s: %v", currentProject, err))
-			fmt.Printf("获取项目配置失败: %s, 错误: %v\n", currentProject, err)
+			log.Log(log.DEBUG, fmt.Sprintf("获取项目配置失败: %s, 错误: %v", currentProject, err))
 			break
 		}
-		fmt.Printf("项目配置获取成功: %s\n", currentProject)
+		log.Log(log.DEBUG, fmt.Sprintf("项目配置获取成功: %s", currentProject))
 
 		// Parse permissions for this project
 		permissions := parseReadPermissions(projectConfig, currentProject)
-		fmt.Printf("解析到权限规则数量: %d\n", len(permissions))
+		log.Log(log.DEBUG, fmt.Sprintf("解析到权限规则数量: %d", len(permissions)))
 		allPermissions = append(allPermissions, permissions...)
 
 		// Get parent project info
@@ -334,10 +409,10 @@ func getInheritedPermissions(gerritURL, gerritUser, gerritToken, projectName str
 
 // evaluatePermissions evaluates permissions with inheritance and priority rules
 func evaluatePermissions(permissions []PermissionRule, userGroups []string, ref string) (bool, string) {
-	fmt.Printf("=== 开始权限评估 ===\n")
-	fmt.Printf("用户组: %v\n", userGroups)
-	fmt.Printf("引用: %s\n", ref)
-	fmt.Printf("权限规则数量: %d\n", len(permissions))
+	log.Log(log.DEBUG, "=== 开始权限评估 ===")
+	log.Log(log.DEBUG, fmt.Sprintf("用户组: %v", userGroups))
+	log.Log(log.DEBUG, fmt.Sprintf("引用: %s", ref))
+	log.Log(log.DEBUG, fmt.Sprintf("权限规则数量: %d", len(permissions)))
 	
 	userGroupSet := make(map[string]bool)
 	for _, group := range userGroups {
@@ -351,40 +426,40 @@ func evaluatePermissions(permissions []PermissionRule, userGroups []string, ref 
 	
 	// 打印所有权限规则
 	for i, perm := range permissions {
-		fmt.Printf("权限规则[%d]: 项目=%s, 动作=%s, 组=%s, 引用=%s, 优先级=%d\n", i, perm.Project, perm.Action, perm.Group, perm.Ref, perm.Priority)
+		log.Log(log.DEBUG, fmt.Sprintf("权限规则[%d]: 项目=%s, 动作=%s, 组=%s, 引用=%s, 优先级=%d", i, perm.Project, perm.Action, perm.Group, perm.Ref, perm.Priority))
 	}
 
 	// First pass: Check for BLOCK permissions - these cannot be overridden
-	fmt.Printf("\n=== 检查BLOCK权限 ===\n")
+	log.Log(log.DEBUG, "=== 检查BLOCK权限 ===")
 	for _, perm := range permissions {
 		if perm.Action == "block" && userGroupSet[perm.Group] {
-			fmt.Printf("找到BLOCK规则: 组=%s, 引用=%s\n", perm.Group, perm.Ref)
+			log.Log(log.DEBUG, fmt.Sprintf("找到BLOCK规则: 组=%s, 引用=%s", perm.Group, perm.Ref))
 			if ref == "" || refPatternMatches(perm.Ref, ref) {
-				fmt.Printf("BLOCK规则匹配，拒绝访问\n")
+				log.Log(log.DEBUG, "BLOCK规则匹配，拒绝访问")
 				return false, fmt.Sprintf("Access blocked by BLOCK rule from project %s for group %s (ref: %s)", perm.Project, perm.Group, perm.Ref)
 			}
 		}
 	}
 
 	// Second pass: Check DENY permissions
-	fmt.Printf("\n=== 检查DENY权限 ===\n")
+	log.Log(log.DEBUG, "=== 检查DENY权限 ===")
 	for _, perm := range permissions {
 		if perm.Action == "deny" && userGroupSet[perm.Group] {
-			fmt.Printf("找到DENY规则: 组=%s, 引用=%s\n", perm.Group, perm.Ref)
+			log.Log(log.DEBUG, fmt.Sprintf("找到DENY规则: 组=%s, 引用=%s", perm.Group, perm.Ref))
 			if ref == "" || refPatternMatches(perm.Ref, ref) {
-				fmt.Printf("DENY规则匹配，拒绝访问\n")
+				log.Log(log.DEBUG, "DENY规则匹配，拒绝访问")
 				return false, fmt.Sprintf("Access denied by rule from project %s for group %s (ref: %s)", perm.Project, perm.Group, perm.Ref)
 			}
 		}
 	}
 
 	// Third pass: Check READ permissions
-	fmt.Printf("\n=== 检查READ权限 ===\n")
+	log.Log(log.DEBUG, "=== 检查READ权限 ===")
 	for _, perm := range permissions {
 		if perm.Action == "read" && userGroupSet[perm.Group] {
-			fmt.Printf("找到READ规则: 组=%s, 引用=%s\n", perm.Group, perm.Ref)
+			log.Log(log.DEBUG, fmt.Sprintf("找到READ规则: 组=%s, 引用=%s", perm.Group, perm.Ref))
 			if ref == "" || refPatternMatches(perm.Ref, ref) {
-				fmt.Printf("READ规则匹配，允许访问\n")
+				log.Log(log.DEBUG, "READ规则匹配，允许访问")
 				return true, fmt.Sprintf("Access granted by rule from project %s for group %s (ref: %s)", perm.Project, perm.Group, perm.Ref)
 			}
 		}
@@ -410,11 +485,47 @@ func refPatternMatches(pattern, ref string) bool {
 	return matched
 }
 
+// ClearCache 清空所有缓存（借鉴Python版本的缓存管理）
+func ClearCache() {
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+	
+	userGroupsCache = make(map[string][]string)
+	repoAccessCache = make(map[string][]PermissionRule)
+	log.Log(log.DEBUG, "All caches cleared")
+}
+
+// ClearUserCache 清空特定用户的缓存
+func ClearUserCache(username string) {
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+	
+	delete(userGroupsCache, username)
+	log.Log(log.DEBUG, fmt.Sprintf("Cache cleared for user %s", username))
+}
+
+// ClearRepoCache 清空特定仓库的缓存
+func ClearRepoCache(repoName string) {
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+	
+	delete(repoAccessCache, repoName)
+	log.Log(log.DEBUG, fmt.Sprintf("Cache cleared for repo %s", repoName))
+}
+
+// GetCacheStats 获取缓存统计信息
+func GetCacheStats() (int, int) {
+	cacheMutex.RLock()
+	defer cacheMutex.RUnlock()
+	
+	return len(userGroupsCache), len(repoAccessCache)
+}
+
 // checkProjectAccess checks user's access to project with full inheritance support
 func checkProjectAccess(gerritURL, gerritUser, gerritToken, username, projectName string) (bool, error) {
-	fmt.Printf("\n\n=== 开始项目访问检查 ===\n")
-	fmt.Printf("用户: %s\n", username)
-	fmt.Printf("项目: %s\n", projectName)
+	log.Log(log.DEBUG, "=== 开始项目访问检查 ===")
+	log.Log(log.DEBUG, fmt.Sprintf("用户: %s", username))
+	log.Log(log.DEBUG, fmt.Sprintf("项目: %s", projectName))
 	
 	userGroups, err := getUserGroups(gerritURL, gerritUser, gerritToken, username)
 	if err != nil {
@@ -425,7 +536,7 @@ func checkProjectAccess(gerritURL, gerritUser, gerritToken, username, projectNam
 	}
 
 	log.Log(log.INFO, fmt.Sprintf("User '%s' is in groups: %v", username, userGroups))
-	fmt.Printf("用户组获取成功: %v\n", userGroups)
+	log.Log(log.DEBUG, fmt.Sprintf("用户组获取成功: %v", userGroups))
 
 	// Get inherited permissions from project and all parent projects
 	permissions, err := getInheritedPermissions(gerritURL, gerritUser, gerritToken, projectName)

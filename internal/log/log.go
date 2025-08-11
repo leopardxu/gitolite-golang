@@ -13,7 +13,8 @@ import (
 type LogLevel int
 
 const (
-	INFO LogLevel = iota
+	DEBUG LogLevel = iota
+	INFO
 	WARN
 	ERROR
 )
@@ -201,6 +202,8 @@ func Log(level LogLevel, message string) {
 
 	var levelStr string
 	switch level {
+	case DEBUG:
+		levelStr = "DEBUG"
 	case INFO:
 		levelStr = "INFO"
 	case WARN:
