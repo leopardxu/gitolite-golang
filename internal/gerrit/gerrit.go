@@ -47,7 +47,7 @@ type PermissionRule struct {
 func CheckAccess(gerritURL, username, repo, gerritUser, gerritToken string) (bool, error) {
 	// For specific users, directly return permission granted
 	log.Log(log.INFO, fmt.Sprintf("Checking access for user %s on repository %s", username, repo))
-	if username == "gerrit-replication" {
+	if username == "gerrit-replication" || username == "git" {
 		return true, nil
 	}
 
@@ -128,7 +128,7 @@ func getUserGroups(gerritURL, gerritUser, gerritToken, username string) ([]strin
 	cacheMutex.RUnlock()
 
 	log.Log(log.DEBUG, fmt.Sprintf("Fetching groups for user %s", username))
-	
+
 	groups := make(map[string]bool)
 	visited := make(map[string]bool)
 
@@ -358,7 +358,7 @@ func parseReadPermissions(configContent, projectName string) []PermissionRule {
 func getInheritedPermissions(gerritURL, gerritUser, gerritToken, projectName string) ([]PermissionRule, error) {
 	log.Log(log.DEBUG, "=== 获取继承权限 ===")
 	log.Log(log.DEBUG, fmt.Sprintf("项目: %s", projectName))
-	
+
 	var allPermissions []PermissionRule
 	visited := make(map[string]bool)
 	currentProject := projectName
@@ -413,7 +413,7 @@ func evaluatePermissions(permissions []PermissionRule, userGroups []string, ref 
 	log.Log(log.DEBUG, fmt.Sprintf("用户组: %v", userGroups))
 	log.Log(log.DEBUG, fmt.Sprintf("引用: %s", ref))
 	log.Log(log.DEBUG, fmt.Sprintf("权限规则数量: %d", len(permissions)))
-	
+
 	userGroupSet := make(map[string]bool)
 	for _, group := range userGroups {
 		userGroupSet[group] = true
@@ -423,7 +423,7 @@ func evaluatePermissions(permissions []PermissionRule, userGroups []string, ref 
 	sort.Slice(permissions, func(i, j int) bool {
 		return permissions[i].Priority > permissions[j].Priority
 	})
-	
+
 	// 打印所有权限规则
 	for i, perm := range permissions {
 		log.Log(log.DEBUG, fmt.Sprintf("权限规则[%d]: 项目=%s, 动作=%s, 组=%s, 引用=%s, 优先级=%d", i, perm.Project, perm.Action, perm.Group, perm.Ref, perm.Priority))
@@ -489,7 +489,7 @@ func refPatternMatches(pattern, ref string) bool {
 func ClearCache() {
 	cacheMutex.Lock()
 	defer cacheMutex.Unlock()
-	
+
 	userGroupsCache = make(map[string][]string)
 	repoAccessCache = make(map[string][]PermissionRule)
 	log.Log(log.DEBUG, "All caches cleared")
@@ -499,7 +499,7 @@ func ClearCache() {
 func ClearUserCache(username string) {
 	cacheMutex.Lock()
 	defer cacheMutex.Unlock()
-	
+
 	delete(userGroupsCache, username)
 	log.Log(log.DEBUG, fmt.Sprintf("Cache cleared for user %s", username))
 }
@@ -508,7 +508,7 @@ func ClearUserCache(username string) {
 func ClearRepoCache(repoName string) {
 	cacheMutex.Lock()
 	defer cacheMutex.Unlock()
-	
+
 	delete(repoAccessCache, repoName)
 	log.Log(log.DEBUG, fmt.Sprintf("Cache cleared for repo %s", repoName))
 }
@@ -517,7 +517,7 @@ func ClearRepoCache(repoName string) {
 func GetCacheStats() (int, int) {
 	cacheMutex.RLock()
 	defer cacheMutex.RUnlock()
-	
+
 	return len(userGroupsCache), len(repoAccessCache)
 }
 
@@ -526,7 +526,7 @@ func checkProjectAccess(gerritURL, gerritUser, gerritToken, username, projectNam
 	log.Log(log.DEBUG, "=== 开始项目访问检查 ===")
 	log.Log(log.DEBUG, fmt.Sprintf("用户: %s", username))
 	log.Log(log.DEBUG, fmt.Sprintf("项目: %s", projectName))
-	
+
 	userGroups, err := getUserGroups(gerritURL, gerritUser, gerritToken, username)
 	if err != nil {
 		log.Log(log.INFO, fmt.Sprintf("Failed to get user groups for %s: %v", username, err))
