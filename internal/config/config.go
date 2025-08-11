@@ -73,7 +73,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	// Debug: print whitelist configuration
-	fmt.Printf("DEBUG: Loaded whitelist users: %v\n", config.Whitelist.Users)
+	// fmt.Printf("DEBUG: Loaded whitelist users: %v\n", config.Whitelist.Users) // 注释掉，避免混入Git协议流
 
 	return &config, nil
 }

@@ -65,9 +65,6 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 	}
 	repoPath = validatedPath
 
-	// Log repository path information
-	log.Log(log.INFO, fmt.Sprintf("Processing repository: %s, full path: %s", repo, repoPath))
-
 	// Check if repository exists, if not and it's a push operation, initialize repository
 	if verb == "git-receive-pack" {
 		if err := ensureRepoExists(repoPath); err != nil {
@@ -76,10 +73,6 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 	} else if _, err := os.Stat(repoPath); os.IsNotExist(err) {
 		return fmt.Errorf("repository does not exist: %s", repo)
 	}
-
-	// Build Git command
-	// Use repository path instead of repository name to ensure support for subdirectory structure
-	log.Log(log.INFO, fmt.Sprintf("Executing Git command: %s on repository: %s", verb, repoPath))
 
 	// Use a more secure approach to execute git commands
 	var cmd *exec.Cmd
@@ -95,8 +88,8 @@ func ExecuteGitCommand(verb, repo, repoBase string) error {
 	}
 
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
 }

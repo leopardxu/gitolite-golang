@@ -168,9 +168,9 @@ func runNormalMode(cfg *config.Config, glUser string) error {
 		return nil
 	}
 
-	log.Log(log.INFO, fmt.Sprintf("Processing SSH command: %s", sshCommand))
+	// log.Log(log.INFO, fmt.Sprintf("Processing SSH command: %s", sshCommand)) // 注释掉，避免混入Git协议流
 	// Log repository path information
-	log.Log(log.INFO, fmt.Sprintf("Repository base path: %s", cfg.RepoBase))
+	// log.Log(log.INFO, fmt.Sprintf("Repository base path: %s", cfg.RepoBase)) // 注释掉，避免混入Git协议流
 	// Build complete repository path for logging
 	// fullRepoPath := filepath.Join(cfg.RepoBase, repo+".git")
 	// log.Log(log.INFO, fmt.Sprintf("Complete repository path: %s", fullRepoPath))
@@ -195,29 +195,29 @@ func runNormalMode(cfg *config.Config, glUser string) error {
 	// Handle potential absolute path issues, ensure it doesn't contain repo_base prefix
 	repo = strings.TrimPrefix(repo, cfg.RepoBase)
 	// Log the processed repository path
-	log.Log(log.INFO, fmt.Sprintf("Processed repository path: %s", repo))
+	// log.Log(log.INFO, fmt.Sprintf("Processed repository path: %s", repo)) // 注释掉，避免混入Git协议流
 
 	// Get user information, prioritize command line argument, then GL_USER, then SSH_USER or USER
 	var user string
 	if glUser != "" {
 		user = glUser
-		log.Log(log.INFO, fmt.Sprintf("Using user from command line argument: %s", user))
+		// log.Log(log.INFO, fmt.Sprintf("Using user from command line argument: %s", user)) // 注释掉，避免混入Git协议流
 	} else {
 		user = os.Getenv("GL_USER")
-		log.Log(log.INFO, fmt.Sprintf("GL_USER environment variable: '%s'", user))
+		// log.Log(log.INFO, fmt.Sprintf("GL_USER environment variable: '%s'", user)) // 注释掉，避免混入Git协议流
 		if user == "" {
 			user = os.Getenv("SSH_USER")
-			log.Log(log.INFO, fmt.Sprintf("SSH_USER environment variable: '%s'", user))
+			// log.Log(log.INFO, fmt.Sprintf("SSH_USER environment variable: '%s'", user)) // 注释掉，避免混入Git协议流
 			if user == "" {
 				user = os.Getenv("USER")
-				log.Log(log.INFO, fmt.Sprintf("USER environment variable: '%s'", user))
+				// log.Log(log.INFO, fmt.Sprintf("USER environment variable: '%s'", user)) // 注释掉，避免混入Git协议流
 				if user == "" {
 					return fmt.Errorf("unable to determine user identity, no command line argument provided and GL_USER, SSH_USER and USER environment variables are all not set")
 				}
 			}
-			log.Log(log.WARN, fmt.Sprintf("GL_USER not set, using fallback user: %s", user))
+			// log.Log(log.WARN, fmt.Sprintf("GL_USER not set, using fallback user: %s", user)) // 注释掉，避免混入Git协议流
 		} else {
-			log.Log(log.INFO, fmt.Sprintf("Using user from GL_USER: %s", user))
+			// log.Log(log.INFO, fmt.Sprintf("Using user from GL_USER: %s", user)) // 注释掉，避免混入Git协议流
 		}
 	}
 
@@ -427,7 +427,7 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 	// Ensure it doesn't contain repo_base prefix
 	repo = strings.TrimPrefix(repo, cfg.RepoBase)
 	// Log the repository path being processed
-	log.Log(log.INFO, fmt.Sprintf("Processing Git operation repository path: %s", repo))
+	// log.Log(log.INFO, fmt.Sprintf("Processing Git operation repository path: %s", repo)) // 注释掉，避免混入Git协议流
 	// Remove possible .git suffix
 	repoBase := strings.TrimSuffix(repo, ".git")
 

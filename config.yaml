@@ -42,6 +42,8 @@ audit:
   enabled: true  # 是否启用审计功能
   log_path: "****/gitolite/audit.log"  # 审计日志文件路径
   console_out: true  # 是否在控制台输出结构化访问信息
+
+# Gerrit免权限检查白名单配置，使用在replication场景
 whitelist:
   users:  # 跳过权限检查的用户列表
     - "gerrit-replication"
