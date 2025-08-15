@@ -16,6 +16,11 @@ func ParseSSHCommand(cmd string) (verb, repo string, err error) {
 		return "", "", fmt.Errorf("SSH_ORIGINAL_COMMAND environment variable not set")
 	}
 
+	// Handle Gerrit replication commands with embedded Git operations
+	if strings.Contains(cmd, "gerrit-replication") {
+		return parseGerritReplicationCommand(cmd)
+	}
+
 	// Handle special commands, such as repository creation commands
 	log.Printf("[INFO] cmd: %s ", cmd)
 	if strings.Contains(cmd, "mkdir -p") && strings.Contains(cmd, "git init --bare") {
@@ -45,6 +50,11 @@ func ParseSSHCommand(cmd string) (verb, repo string, err error) {
 			return "init", repoName, nil
 		}
 		log.Printf("[ERROR] Unable to extract repository path from command")
+	}
+
+	// 禁止执行单独的 mkdir 命令，但允许仓库创建命令中的 mkdir
+	if strings.HasPrefix(cmd, "mkdir ") && !strings.Contains(cmd, "git init --bare") {
+		return "", "", fmt.Errorf("direct execution of mkdir command is not supported, please use git-receive-pack or git-upload-pack command")
 	}
 
 	// Original git command parsing logic
@@ -80,19 +90,81 @@ func ParseSSHCommand(cmd string) (verb, repo string, err error) {
 	return matches[1], repoPath, nil
 }
 
+// parseGerritReplicationCommand parses Gerrit replication commands to extract Git operation and repository
+func parseGerritReplicationCommand(cmd string) (verb, repo string, err error) {
+	log.Printf("[DEBUG] Parsing Gerrit replication command: %s", cmd)
+
+	// Gerrit replication commands typically contain git-receive-pack or git-upload-pack
+	if strings.Contains(cmd, "git-receive-pack") {
+		// Extract repository from git-receive-pack command
+		if repo, err := extractRepoFromGitCommand(cmd, "git-receive-pack"); err == nil {
+			log.Printf("[INFO] Gerrit replication git-receive-pack for repo: %s", repo)
+			return "gerrit-replication", repo, nil
+		}
+	} else if strings.Contains(cmd, "git-upload-pack") {
+		// Extract repository from git-upload-pack command
+		if repo, err := extractRepoFromGitCommand(cmd, "git-upload-pack"); err == nil {
+			log.Printf("[INFO] Gerrit replication git-upload-pack for repo: %s", repo)
+			return "gerrit-replication", repo, nil
+		}
+	} else if strings.Contains(cmd, "git-upload-archive") {
+		// Extract repository from git-upload-archive command
+		if repo, err := extractRepoFromGitCommand(cmd, "git-upload-archive"); err == nil {
+			log.Printf("[INFO] Gerrit replication git-upload-archive for repo: %s", repo)
+			return "gerrit-replication", repo, nil
+		}
+	}
+
+	log.Printf("[ERROR] Unable to parse Gerrit replication command: %s", cmd)
+	return "", "", fmt.Errorf("invalid Gerrit replication command: %s", cmd)
+}
+
+// extractRepoFromGitCommand extracts repository name from Git commands
+func extractRepoFromGitCommand(cmd, gitCmd string) (string, error) {
+	// Pattern to match git commands with repository path
+	pattern := fmt.Sprintf(`%s\s+'([^']+)'`, regexp.QuoteMeta(gitCmd))
+	re := regexp.MustCompile(pattern)
+	matches := re.FindStringSubmatch(cmd)
+
+	if len(matches) >= 2 {
+		repo := matches[1]
+		// Remove .git suffix if present
+		if strings.HasSuffix(repo, ".git") {
+			repo = repo[:len(repo)-4]
+		}
+		return sanitizeRepoName(repo), nil
+	}
+
+	// Try alternative pattern without quotes
+	pattern = fmt.Sprintf(`%s\s+([^\s]+)`, regexp.QuoteMeta(gitCmd))
+	re = regexp.MustCompile(pattern)
+	matches = re.FindStringSubmatch(cmd)
+
+	if len(matches) >= 2 {
+		repo := matches[1]
+		// Remove .git suffix if present
+		if strings.HasSuffix(repo, ".git") {
+			repo = repo[:len(repo)-4]
+		}
+		return sanitizeRepoName(repo), nil
+	}
+
+	return "", fmt.Errorf("unable to extract repository from command: %s", cmd)
+}
+
 // sanitizeRepoName removes potentially dangerous characters from repository names
 // to prevent command injection and other security issues
 func sanitizeRepoName(repo string) string {
-	// Remove any characters that could be used for command injection
-	dangerousChars := []string{"'", "`", ";", "&", "|", ">", "<", "$", "(", ")", "[", "]", "{", "}", "\\"}
-	result := repo
+	// Remove potentially dangerous characters
+	repo = regexp.MustCompile(`[^a-zA-Z0-9/_.-]`).ReplaceAllString(repo, "")
 
-	for _, char := range dangerousChars {
-		result = strings.ReplaceAll(result, char, "")
+	// Remove leading and trailing slashes
+	repo = strings.Trim(repo, "/")
+
+	// Prevent empty repository names
+	if repo == "" {
+		repo = "default"
 	}
 
-	// Also remove any potential path traversal sequences
-	result = strings.ReplaceAll(result, "..", "")
-
-	return result
+	return repo
 }

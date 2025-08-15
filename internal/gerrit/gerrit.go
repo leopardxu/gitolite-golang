@@ -568,3 +568,49 @@ func checkProjectAccess(gerritURL, gerritUser, gerritToken, username, projectNam
 
 	return hasAccess, nil
 }
+
+// ComputeHiddenRefs 计算用户在某项目下应被隐藏的引用（基于 READ/DENY/BLOCK）
+func ComputeHiddenRefs(gerritURL, gerritUser, gerritToken, username, projectName string) ([]string, error) {
+	// 拉取用户组
+	userGroups, err := getUserGroups(gerritURL, gerritUser, gerritToken, username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user groups: %w", err)
+	}
+
+	// 获取包含继承的权限规则
+	permissions, err := getInheritedPermissions(gerritURL, gerritUser, gerritToken, projectName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get inherited permissions: %w", err)
+	}
+
+	// 预先收集所有出现过的 ref 模式
+	refSet := make(map[string]struct{})
+	for _, p := range permissions {
+		if strings.TrimSpace(p.Ref) != "" {
+			refSet[p.Ref] = struct{}{}
+		}
+	}
+
+	// 如果没有显式规则，则不隐藏任何引用（fallback）
+	if len(refSet) == 0 {
+		return nil, nil
+	}
+
+	// 将集合转为切片并排序，确保输出稳定
+	var allRefPatterns []string
+	for r := range refSet {
+		allRefPatterns = append(allRefPatterns, r)
+	}
+	sort.Strings(allRefPatterns)
+
+	// 计算需要隐藏的 refs：对于每个 ref 模式，如果 evaluatePermissions(ref) 返回 false，则应隐藏
+	var hidden []string
+	for _, r := range allRefPatterns {
+		allowed, _ := evaluatePermissions(permissions, userGroups, r)
+		if !allowed {
+			hidden = append(hidden, r)
+		}
+	}
+
+	return hidden, nil
+}

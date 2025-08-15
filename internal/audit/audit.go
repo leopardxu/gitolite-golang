@@ -26,15 +26,17 @@ type AccessInfo struct {
 
 // AuditLogger 审计日志记录器
 type AuditLogger struct {
-	logPath string
-	enabled bool
+	logPath    string
+	enabled    bool
+	consoleOut bool
 }
 
 // NewAuditLogger 创建新的审计日志记录器
-func NewAuditLogger(logPath string, enabled bool) *AuditLogger {
+func NewAuditLogger(logPath string, enabled bool, consoleOut bool) *AuditLogger {
 	return &AuditLogger{
-		logPath: logPath,
-		enabled: enabled,
+		logPath:    logPath,
+		enabled:    enabled,
+		consoleOut: consoleOut,
 	}
 }
 
@@ -64,10 +66,12 @@ func (al *AuditLogger) LogAccess(info *AccessInfo) {
 		return
 	}
 
-	// 结构化输出到控制台
-	al.printStructuredInfo(info)
+	// 按配置输出到控制台
+	if al.consoleOut {
+		al.printStructuredInfo(info)
+	}
 
-	// 记录到审计日志文件
+	// 记录到审计日志文件（当配置了路径时）
 	if al.logPath != "" {
 		al.writeToAuditLog(info)
 	}

@@ -15,7 +15,7 @@ import (
 	"gitolite-golang/internal/gerrit"
 	"gitolite-golang/internal/git"
 	"gitolite-golang/internal/log"
-	"gitolite-golang/internal/mirror"
+	"gitolite-golang/internal/protocol"     // 添加protocol包导入
 	intsync "gitolite-golang/internal/sync" // Internal sync package, using alias to avoid conflict
 )
 
@@ -137,19 +137,19 @@ func runDaemonMode(cfg *config.Config) {
 	// Start SSH key synchronization task
 	intsync.StartSyncTask(cfg.GerritURL, cfg.GerritUser, cfg.GerritAPIToken, cfg.AuthorizedKeys)
 
-	// Start mirror scheduler if mirroring is enabled
-	if cfg.Mirror.Enabled && len(cfg.Mirror.Targets) > 0 {
-		schedule := cfg.Mirror.Schedule
-		if schedule == "" {
-			schedule = "@hourly" // Default to hourly if not specified
-		}
-		log.Log(log.INFO, fmt.Sprintf("Starting mirror scheduler in daemon mode with schedule: %s", schedule))
-		mirror.StartMirrorScheduler(cfg.RepoBase, mirror.MirrorConfig{
-			Enabled:  cfg.Mirror.Enabled,
-			Targets:  cfg.Mirror.Targets,
-			Schedule: cfg.Mirror.Schedule,
-		}, schedule)
-	}
+	// Mirror scheduler is removed
+	// if cfg.Mirror.Enabled && len(cfg.Mirror.Targets) > 0 {
+	// 	schedule := cfg.Mirror.Schedule
+	// 	if schedule == "" {
+	// 		schedule = "@hourly" // Default to hourly if not specified
+	// 	}
+	// 	log.Log(log.INFO, fmt.Sprintf("Starting mirror scheduler in daemon mode with schedule: %s", schedule))
+	// 	mirror.StartMirrorScheduler(cfg.RepoBase, mirror.MirrorConfig{
+	// 		Enabled:  cfg.Mirror.Enabled,
+	// 		Targets:  cfg.Mirror.Targets,
+	// 		Schedule: cfg.Mirror.Schedule,
+	// 	}, schedule)
+	// }
 
 	<-done
 }
@@ -157,9 +157,9 @@ func runDaemonMode(cfg *config.Config) {
 // Normal mode processing
 func runNormalMode(cfg *config.Config, glUser string) error {
 	// Initialize audit logger
-	auditLogger := audit.NewAuditLogger(cfg.Audit.LogPath, cfg.Audit.Enabled)
+	auditLogger := audit.NewAuditLogger(cfg.Audit.LogPath, cfg.Audit.Enabled, cfg.Audit.ConsoleOut)
 
-	// 1. Parse SSH original command
+	// 1. Parse SSH original command using protocol.ParseSSHCommand
 	sshCommand := os.Getenv("SSH_ORIGINAL_COMMAND")
 	if sshCommand == "" {
 		log.Log(log.WARN, "SSH_ORIGINAL_COMMAND environment variable not set, user may be directly logging in via SSH")
@@ -168,34 +168,20 @@ func runNormalMode(cfg *config.Config, glUser string) error {
 		return nil
 	}
 
-	// log.Log(log.INFO, fmt.Sprintf("Processing SSH command: %s", sshCommand)) // 注释掉，避免混入Git协议流
-	// Log repository path information
-	// log.Log(log.INFO, fmt.Sprintf("Repository base path: %s", cfg.RepoBase)) // 注释掉，避免混入Git协议流
-	// Build complete repository path for logging
-	// fullRepoPath := filepath.Join(cfg.RepoBase, repo+".git")
-	// log.Log(log.INFO, fmt.Sprintf("Complete repository path: %s", fullRepoPath))
-
-	// Improved command parsing logic to handle options
-	parts := strings.Fields(sshCommand)
-	if len(parts) < 1 {
-		return fmt.Errorf("invalid SSH command format")
+	// Use protocol.ParseSSHCommand for proper parsing including Gerrit replication commands
+	verb, repo, parseErr := protocol.ParseSSHCommand(sshCommand)
+	if parseErr != nil {
+		log.Log(log.ERROR, fmt.Sprintf("Failed to parse SSH command: %v, command: %s", parseErr, sshCommand))
+		return fmt.Errorf("failed to parse SSH command: %w", parseErr)
 	}
 
-	verb := parts[0]
-
-	// Ensure there are enough parameters to get the repository name
-	if len(parts) < 2 {
-		return fmt.Errorf("command missing repository parameter")
-	}
-
-	repo := strings.Trim(strings.Join(parts[1:], " "), "'\"")
+	// Log parsing result for debugging
+	log.Log(log.INFO, fmt.Sprintf("Parsed SSH command: verb=%s, repo=%s", verb, repo))
 
 	// Handle potential absolute path issues
 	repo = strings.TrimPrefix(repo, "/")
 	// Handle potential absolute path issues, ensure it doesn't contain repo_base prefix
 	repo = strings.TrimPrefix(repo, cfg.RepoBase)
-	// Log the processed repository path
-	// log.Log(log.INFO, fmt.Sprintf("Processed repository path: %s", repo)) // 注释掉，避免混入Git协议流
 
 	// Get user information, prioritize command line argument, then GL_USER, then SSH_USER or USER
 	var user string
@@ -243,15 +229,11 @@ func runNormalMode(cfg *config.Config, glUser string) error {
 	case "perms":
 		err = handlePerms(cfg, user, repo)
 	case "gerrit-replication":
+		// 单独记录一次审计：将操作视为 push/fetch/archive 之一
+		accessInfo.Operation = audit.GetOperationType(sshCommand)
 		err = handleGerritReplication(cfg, user, repo)
 	default:
-		// Check if it's a mkdir command, provide more specific error message
-		if strings.Contains(verb, "mkdir") {
-			log.Log(log.ERROR, fmt.Sprintf("Unsupported Git command: %s, should use repo_base as the base path", verb))
-			err = fmt.Errorf("direct execution of mkdir command is not supported, please use git-receive-pack or git-upload-pack command")
-		} else {
-			err = fmt.Errorf("unsupported Git command: %s", verb)
-		}
+		err = fmt.Errorf("unsupported Git command: %s", verb)
 	}
 
 	// Update access result and log audit information
@@ -261,8 +243,8 @@ func runNormalMode(cfg *config.Config, glUser string) error {
 		accessInfo.UpdateResult(true, "")
 	}
 
-	// Log access information if console output is enabled
-	if cfg.Audit.ConsoleOut {
+	// Log access information: 当 Enabled 时总是记录（文件），控制台输出由 ConsoleOut 控制
+	if cfg.Audit.Enabled {
 		auditLogger.LogAccess(accessInfo)
 	}
 
@@ -271,20 +253,38 @@ func runNormalMode(cfg *config.Config, glUser string) error {
 
 // Handle Gerrit replication synchronization task
 func handleGerritReplication(cfg *config.Config, user, repo string) error {
+	// Get the original SSH command to determine the Git operation type
+	sshCommand := os.Getenv("SSH_ORIGINAL_COMMAND")
+	if sshCommand == "" {
+		return fmt.Errorf("SSH_ORIGINAL_COMMAND not set for Gerrit replication")
+	}
+
+	// Determine the Git operation type from the SSH command
+	var gitOperation string
+	if strings.Contains(sshCommand, "git-receive-pack") {
+		gitOperation = "git-receive-pack"
+	} else if strings.Contains(sshCommand, "git-upload-pack") {
+		gitOperation = "git-upload-pack"
+	} else if strings.Contains(sshCommand, "git-upload-archive") {
+		gitOperation = "git-upload-archive"
+	} else {
+		return fmt.Errorf("unsupported Git operation in Gerrit replication command: %s", sshCommand)
+	}
+
 	// Ensure repository name format is correct
 	repo = strings.TrimPrefix(repo, "/")
 	// Ensure it doesn't contain repo_base prefix
 	repo = strings.TrimPrefix(repo, cfg.RepoBase)
 	// Log the repository path being processed
-	log.Log(log.INFO, fmt.Sprintf("Processing Gerrit replication repository path: %s", repo))
+	log.Log(log.INFO, fmt.Sprintf("Processing Gerrit replication repository path: %s, operation: %s", repo, gitOperation))
 	// Remove possible .git suffix, will be added back later
 	repo = strings.TrimSuffix(repo, ".git")
 
 	// Record SSH connection information
 	remoteAddr := os.Getenv("SSH_CLIENT")
 	pid := os.Getpid()
-	log.Log(log.INFO, fmt.Sprintf("%d ssh ARGV=server-%s SOC=git-receive-pack '%s' FROM=%s",
-		pid, user, repo, remoteAddr))
+	log.Log(log.INFO, fmt.Sprintf("%d ssh ARGV=server-%s SOC=%s '%s' FROM=%s",
+		pid, user, gitOperation, repo, remoteAddr))
 
 	// Record mirror pre_git information
 	log.Log(log.INFO, fmt.Sprintf("%d mirror,pre_git,%s,user=,sender=%s,mode=copy",
@@ -300,27 +300,56 @@ func handleGerritReplication(cfg *config.Config, user, repo string) error {
 	repoPath := filepath.Join(cfg.RepoBase, repo+".git")
 
 	// Log the git command being executed
-	log.Log(log.INFO, fmt.Sprintf("%d system,git,shell,-c,git-receive-pack '%s'",
-		pid, repoPath))
+	log.Log(log.INFO, fmt.Sprintf("%d system,git,shell,-c,%s '%s'",
+		pid, gitOperation, repoPath))
 
+	// Handle different Git operations
+	switch gitOperation {
+	case "git-receive-pack":
+		return handleGerritReplicationPush(cfg, user, repo, repoPath, pid)
+	case "git-upload-pack":
+		return handleGerritReplicationFetch(cfg, user, repo, repoPath, pid)
+	case "git-upload-archive":
+		return handleGerritReplicationArchive(cfg, user, repo, repoPath, pid)
+	default:
+		return fmt.Errorf("unsupported Git operation: %s", gitOperation)
+	}
+}
+
+// handleGerritReplicationPush handles push operations for Gerrit replication
+func handleGerritReplicationPush(cfg *config.Config, user, repo, repoPath string, pid int) error {
 	// Check if repository exists
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
-		log.Log(log.INFO, fmt.Sprintf("Repository does not exist, creating automatically: %s", repo))
+		log.Log(log.INFO, fmt.Sprintf("Repository does not exist, creating automatically for replication: %s", repo))
 		if err := handleRepoInit(cfg, user, repo); err != nil {
-			return err
+			log.Log(log.ERROR, fmt.Sprintf("Failed to create repository for replication: %s, error: %v", repo, err))
+			return fmt.Errorf("failed to create repository for replication: %w", err)
 		}
 	}
 
-	// Execute synchronization operation, passing the Gerrit remote URL from configuration:
-	if err := git.SyncRepository(repoPath, cfg.GerritRemoteURL, cfg.RepoBase); err != nil {
-		log.Log(log.ERROR, fmt.Sprintf("Repository synchronization failed: %s, error: %v", repo, err))
-		return fmt.Errorf("Repository synchronization failed: %w", err)
+	// Execute git-receive-pack to handle the actual push/delete operations from Gerrit
+	// This is crucial for processing branch deletions and other ref updates
+	if err := git.ExecuteGitCommand("git-receive-pack", repo, cfg.RepoBase); err != nil {
+		log.Log(log.ERROR, fmt.Sprintf("Git receive-pack failed for replication: %s, error: %v", repo, err))
+		return fmt.Errorf("Git receive-pack failed for replication: %w", err)
 	}
 
-	// Record reference update information
+	// After processing the push, optionally sync with Gerrit to ensure consistency
+	// Note: This sync might not be necessary since we just received updates from Gerrit
+	// but we keep it for backward compatibility and to handle any edge cases
+	if err := git.SyncRepository(repoPath, cfg.GerritRemoteURL, cfg.RepoBase); err != nil {
+		log.Log(log.WARN, fmt.Sprintf("Repository synchronization after push failed: %s, error: %v", repo, err))
+		// Don't return error here as the main push operation succeeded
+	}
+
+	// Record reference update information（包含删除识别：当 newHash 为 40 个 0 表示删除）
 	refs, err := git.GetUpdatedRefs(repoPath)
 	if err == nil && len(refs) > 0 {
 		for _, ref := range refs {
+			// 额外标注删除事件
+			if ref.NewHash == strings.Repeat("0", 40) || strings.HasPrefix(ref.NewHash, "0000000000") {
+				log.Log(log.INFO, fmt.Sprintf("Detected delete on %s", ref.RefName))
+			}
 			log.Log(log.INFO, fmt.Sprintf("%d update %s (git) bypass %s %s %s",
 				pid, repoPath, ref.RefName, ref.OldHash, ref.NewHash))
 		}
@@ -335,8 +364,79 @@ func handleGerritReplication(cfg *config.Config, user, repo string) error {
 	// Record end marker
 	log.Log(log.INFO, fmt.Sprintf("%d END", pid))
 
-	// Execute hook scripts
-	runHooks(cfg, "post-receive", repo, user)
+	// Execute hook scripts，并将更新列表传递给 post-receive
+	if len(refs) > 0 {
+		var sb strings.Builder
+		for _, ref := range refs {
+			sb.WriteString(ref.OldHash)
+			sb.WriteByte(' ')
+			sb.WriteString(ref.NewHash)
+			sb.WriteByte(' ')
+			sb.WriteString(ref.RefName)
+			sb.WriteByte('\n')
+		}
+		_ = runHooksWithStdin(cfg, "post-receive", repo, user, sb.String())
+	} else {
+		_ = runHooks(cfg, "post-receive", repo, user)
+	}
+
+	return nil
+}
+
+// handleGerritReplicationFetch handles fetch operations for Gerrit replication
+func handleGerritReplicationFetch(cfg *config.Config, user, repo, repoPath string, pid int) error {
+	// Check if repository exists
+	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		log.Log(log.INFO, fmt.Sprintf("Repository does not exist, creating automatically for fetch replication: %s", repo))
+		if err := handleRepoInit(cfg, user, repo); err != nil {
+			log.Log(log.ERROR, fmt.Sprintf("Failed to create repository for fetch replication: %s, error: %v", repo, err))
+			return fmt.Errorf("failed to create repository for fetch replication: %w", err)
+		}
+	}
+
+	// Execute git-upload-pack command for fetch operation
+	if err := git.ExecuteGitCommand("git-upload-pack", repo, cfg.RepoBase); err != nil {
+		log.Log(log.ERROR, fmt.Sprintf("Git upload-pack failed: %s, error: %v", repo, err))
+		return fmt.Errorf("Git upload-pack failed: %w", err)
+	}
+
+	// Record post_git information
+	hostname, _ := os.Hostname()
+	log.Log(log.INFO, fmt.Sprintf("%d post_git() on %s", pid, hostname))
+	log.Log(log.INFO, fmt.Sprintf("%d mirror,post_git,%s,user=,sender=%s,mode=fetch",
+		pid, repo, user))
+
+	// Record end marker
+	log.Log(log.INFO, fmt.Sprintf("%d END", pid))
+
+	return nil
+}
+
+// handleGerritReplicationArchive handles archive operations for Gerrit replication
+func handleGerritReplicationArchive(cfg *config.Config, user, repo, repoPath string, pid int) error {
+	// Check if repository exists
+	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		log.Log(log.INFO, fmt.Sprintf("Repository does not exist, creating automatically for archive replication: %s", repo))
+		if err := handleRepoInit(cfg, user, repo); err != nil {
+			log.Log(log.ERROR, fmt.Sprintf("Failed to create repository for archive replication: %s, error: %v", repo, err))
+			return fmt.Errorf("failed to create repository for archive replication: %w", err)
+		}
+	}
+
+	// Execute git-upload-archive command for archive operation
+	if err := git.ExecuteGitCommand("git-upload-archive", repo, cfg.RepoBase); err != nil {
+		log.Log(log.ERROR, fmt.Sprintf("Git upload-archive failed: %s, error: %v", repo, err))
+		return fmt.Errorf("Git upload-archive failed: %w", err)
+	}
+
+	// Record post_git information
+	hostname, _ := os.Hostname()
+	log.Log(log.INFO, fmt.Sprintf("%d post_git() on %s", pid, hostname))
+	log.Log(log.INFO, fmt.Sprintf("%d mirror,post_git,%s,user=,sender=%s,mode=archive",
+		pid, repo, user))
+
+	// Record end marker
+	log.Log(log.INFO, fmt.Sprintf("%d END", pid))
 
 	return nil
 }
@@ -431,22 +531,44 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 	// Remove possible .git suffix
 	repoBase := strings.TrimSuffix(repo, ".git")
 
-	// Check access permission (including whitelist check)
-	allowed, err := gerrit.CheckAccess(cfg.GerritURL, user, repoBase,
-		cfg.GerritUser, cfg.GerritAPIToken, cfg)
-	if err != nil {
-		// Log detailed error information to help diagnose problems
-		log.Log(log.ERROR, fmt.Sprintf("Gerrit API call failed: %v (URL: %s, User: %s, Repo: %s)",
-			err, cfg.GerritURL, user, repoBase))
-
-		// Check if the error contains specific strings, possibly a command line parameter error
-		errStr := err.Error()
-		if strings.Contains(errStr, "--account") {
-			log.Log(log.WARN, "Detected possible Gerrit API parameter error, please check configuration")
-			return fmt.Errorf("Gerrit API configuration error, please contact administrator")
+	// Determine if current user should be treated as a replication user
+	// We treat the following users as replication users to allow automatic repo creation during fetch/archive and bypass permission check:
+	// 1) Dedicated accounts: gerrit-replication, git
+	// 2) Whitelisted users in configuration (commonly service accounts like svc.gitadmin)
+	isReplicationUser := false
+	if user == "gerrit-replication" || user == "git" {
+		isReplicationUser = true
+	} else {
+		for _, whitelistUser := range cfg.Whitelist.Users {
+			if user == whitelistUser {
+				isReplicationUser = true
+				break
+			}
 		}
+	}
 
-		return fmt.Errorf("Failed to check access permission: %w", err)
+	// Check access permission (skip for replication users)
+	var allowed bool
+	var err error
+	if isReplicationUser {
+		allowed = true
+	} else {
+		allowed, err = gerrit.CheckAccess(cfg.GerritURL, user, repoBase,
+			cfg.GerritUser, cfg.GerritAPIToken, cfg)
+		if err != nil {
+			// Log detailed error information to help diagnose problems
+			log.Log(log.ERROR, fmt.Sprintf("Gerrit API call failed: %v (URL: %s, User: %s, Repo: %s)",
+				err, cfg.GerritURL, user, repoBase))
+
+			// Check if the error contains specific strings, possibly a command line parameter error
+			errStr := err.Error()
+			if strings.Contains(errStr, "--account") {
+				log.Log(log.WARN, "Detected possible Gerrit API parameter error, please check configuration")
+				return fmt.Errorf("Gerrit API configuration error, please contact administrator")
+			}
+
+			return fmt.Errorf("Failed to check access permission: %w", err)
+		}
 	}
 	if !allowed {
 		return fmt.Errorf("User %s has no permission to access repository %s", user, repoBase)
@@ -455,8 +577,8 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 	// Check if repository exists
 	repoPath := filepath.Join(cfg.RepoBase, repoBase+".git")
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
-		// If it's a push operation and the repository doesn't exist, create the repository
-		if verb == "git-receive-pack" {
+		// If it's a push operation or a replication user performing fetch/archive, create the repository
+		if verb == "git-receive-pack" || isReplicationUser {
 			log.Log(log.INFO, fmt.Sprintf("Repository does not exist, creating automatically: %s", repoBase))
 			if err := handleRepoInit(cfg, user, repoBase); err != nil {
 				return err
@@ -474,7 +596,23 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 	}
 
 	// Execute Git command, passing repository name without .git suffix
-	err = git.ExecuteGitCommand(verb, repoBase, cfg.RepoBase)
+	// err = git.ExecuteGitCommand(verb, repoBase, cfg.RepoBase)
+	if verb == "git-upload-pack" {
+		// 在克隆/拉取阶段进行分支级隐藏：计算用户不可读的 refs 并通过 uploadpack.hideRefs 传入
+		hidden, herr := gerrit.ComputeHiddenRefs(cfg.GerritURL, cfg.GerritUser, cfg.GerritAPIToken, user, repoBase)
+		if herr != nil {
+			// 为了安全起见，失败时不隐藏任何引用，但仍继续执行（避免影响可用性）
+			log.Log(log.WARN, fmt.Sprintf("Failed to compute hidden refs for %s/%s: %v", user, repoBase, herr))
+			err = git.ExecuteGitCommand(verb, repoBase, cfg.RepoBase)
+		} else if len(hidden) == 0 {
+			err = git.ExecuteGitCommand(verb, repoBase, cfg.RepoBase)
+		} else {
+			// 将隐藏模式拼接为多条配置项，Git 支持多次传递 -c uploadpack.hideRefs=pattern
+			err = git.ExecuteGitUploadPackWithHideRefs(repoBase, cfg.RepoBase, hidden)
+		}
+	} else {
+		err = git.ExecuteGitCommand(verb, repoBase, cfg.RepoBase)
+	}
 
 	// If it's a push operation, check if there are tag updates
 	if verb == "git-receive-pack" && err == nil {
@@ -482,20 +620,33 @@ func handleGitOperation(cfg *config.Config, user, repo, verb string) error {
 		refs, refErr := git.GetUpdatedRefs(repoPath)
 		if refErr == nil && len(refs) > 0 {
 			pid := os.Getpid()
+			var sb strings.Builder
 			for _, ref := range refs {
 				// Record all reference updates, especially mark tag operations
 				if strings.HasPrefix(ref.RefName, "refs/tags/") {
 					log.Log(log.INFO, fmt.Sprintf("Detected tag operation: %s", ref.RefName))
 				}
+				// 标注删除
+				if ref.NewHash == strings.Repeat("0", 40) || strings.HasPrefix(ref.NewHash, "0000000000") {
+					log.Log(log.INFO, fmt.Sprintf("Detected delete on %s", ref.RefName))
+				}
 				log.Log(log.INFO, fmt.Sprintf("%d update %s (git) bypass %s %s %s",
 					pid, repoPath, ref.RefName, ref.OldHash, ref.NewHash))
+				// 组装 post-receive stdin 行：old new ref
+				sb.WriteString(ref.OldHash)
+				sb.WriteByte(' ')
+				sb.WriteString(ref.NewHash)
+				sb.WriteByte(' ')
+				sb.WriteString(ref.RefName)
+				sb.WriteByte('\n')
 			}
-		}
-
-		// Execute post-receive hook
-		if err := runHooks(cfg, "post-receive", repoBase, user); err != nil {
-			log.Log(log.WARN, fmt.Sprintf("post-receive hook execution failed: %v", err))
-			// Don't return error, as the main operation has already succeeded
+			// 传给 post-receive 钩子
+			_ = runHooksWithStdin(cfg, "post-receive", repoBase, user, sb.String())
+		} else {
+			// 即使没有解析到更新，也执行一次 post-receive（保持行为兼容）
+			if hookErr := runHooks(cfg, "post-receive", repoBase, user); hookErr != nil {
+				log.Log(log.WARN, fmt.Sprintf("post-receive hook execution failed: %v", hookErr))
+			}
 		}
 	}
 
@@ -1084,13 +1235,6 @@ func runHooks(cfg *config.Config, hookType, repo, user string) error {
 	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
 		// Hook script doesn't exist, skip execution
 		log.Log(log.INFO, fmt.Sprintf("Hook script doesn't exist, skipping execution: %s", hookPath))
-
-		// If this is a post-receive hook, check if we need to handle mirroring
-		if hookType == "post-receive" && cfg.Mirror.Enabled {
-			repoPath := filepath.Join(cfg.RepoBase, repo+".git")
-			return handleMirrorPush(cfg, repoPath, repo)
-		}
-
 		return nil
 	}
 
@@ -1113,31 +1257,40 @@ func runHooks(cfg *config.Config, hookType, repo, user string) error {
 	log.Log(log.INFO, fmt.Sprintf("Hook script executed successfully: %s, output: %s",
 		hookPath, string(output)))
 
-	// If this is a post-receive hook, check if we need to handle mirroring
-	if hookType == "post-receive" && cfg.Mirror.Enabled {
-		repoPath := filepath.Join(cfg.RepoBase, repo+".git")
-		if err := handleMirrorPush(cfg, repoPath, repo); err != nil {
-			log.Log(log.WARN, fmt.Sprintf("Mirror push failed: %v", err))
-			// Don't return error, as the main operation has already succeeded
-		}
-	}
-
 	return nil
 }
 
-// Handle mirror push operation
-func handleMirrorPush(cfg *config.Config, repoPath, repoName string) error {
-	// If mirroring is not enabled, return immediately
-	if !cfg.Mirror.Enabled || len(cfg.Mirror.Targets) == 0 {
+// runHooksWithStdin 允许通过 stdin 传递更新列表（old new ref），便于 post-receive 判断删除等事件
+func runHooksWithStdin(cfg *config.Config, hookType, repo, user, stdinData string) error {
+	// Check if hook directory exists
+	hooksDir := cfg.HooksDir
+	if hooksDir == "" {
+		hooksDir = "~/.gitolite/hooks"
+	}
+
+	// Build hook script path
+	hookPath := filepath.Join(hooksDir, hookType)
+	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
+		// Hook script doesn't exist, skip execution
+		log.Log(log.INFO, fmt.Sprintf("Hook script doesn't exist, skipping execution: %s", hookPath))
 		return nil
 	}
 
-	log.Log(log.INFO, fmt.Sprintf("Starting mirror push for repository %s", repoName))
+	cmd := exec.Command(hookPath)
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("GL_REPO=%s", repo),
+		fmt.Sprintf("GL_USER=%s", user),
+		fmt.Sprintf("GL_HOOKS_DIR=%s", hooksDir),
+	)
+	cmd.Stdin = strings.NewReader(stdinData)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Log(log.ERROR, fmt.Sprintf("Hook script execution failed: %s, error: %v, output: %s",
+			hookPath, err, string(output)))
+		return fmt.Errorf("Hook script execution failed: %w", err)
+	}
 
-	// Mirror the repository to all configured targets
-	return mirror.MirrorRepository(repoPath, repoName, mirror.MirrorConfig{
-		Enabled:  cfg.Mirror.Enabled,
-		Targets:  cfg.Mirror.Targets,
-		Schedule: cfg.Mirror.Schedule,
-	}, true)
+	log.Log(log.INFO, fmt.Sprintf("Hook script executed successfully: %s, output: %s",
+		hookPath, string(output)))
+	return nil
 }

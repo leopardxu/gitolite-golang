@@ -38,7 +38,7 @@
    - 支持控制台输出和文件记录
    - 审计信息与 Git 协议分离，避免干扰
 
-### 6. **钩子系统**
+### 6. 钩子系统
    - 支持 pre-receive、post-receive、update 等多种钩子
    - 自动为新仓库安装钩子
    - 可自定义钩子行为和脚本
@@ -88,29 +88,6 @@ authorized_keys: /home/git/.ssh/authorized_keys
 # 权限和钩子配置
 access_config: /home/git/.gitolite/conf/gitolite.conf
 hooks_dir: /home/git/.gitolite/hooks
-
-# 镜像复制配置
-mirror:
-  enabled: true                # 是否启用镜像功能
-  schedule: "@hourly"          # 定时推送频率 (cron 表达式)
-  targets:                     # 镜像目标列表
-    - name: "backup-server"    # 目标名称
-      url: "git@backup-server:repos/" # 目标 URL
-      enabled: true            # 是否启用此目标
-      async: false             # 是否异步推送
-      timeout: 300             # 推送超时时间(秒)
-      all_repos: false         # 是否镜像所有仓库
-      repos:                   # 需要镜像的仓库列表
-        - "project1"           # 精确匹配
-        - "project2/*"         # 通配符匹配
-    
-    - name: "disaster-recovery"
-      url: "ssh://git@dr-server.example.com/repositories/"
-      enabled: true
-      async: false             # 同步推送（等待推送完成）
-      timeout: 600
-      all_repos: true          # 镜像所有仓库
-
 # 日志配置
 log:
   path: /home/git/gitolite/logs/gitolite.log
@@ -238,62 +215,15 @@ audit:
 
 ### 镜像复制
 
-系统支持将仓库镜像到多个远程服务器，提供灵活的配置选项：
-
-#### 配置镜像
-
-在配置文件中添加 `mirror` 部分，设置镜像目标和推送策略：
-
-```yaml
-mirror:
-  enabled: true
-  schedule: "@hourly"  # 支持 cron 表达式
-  targets:
-    - name: "backup-server"
-      url: "git@backup-server:repos/"
-      enabled: true
-      async: false       # 同步推送
-      timeout: 300
-      all_repos: false   # 选择性镜像
-      repos:
-        - "project1"
-        - "group1/*"     # 支持通配符
-```
-
-#### 手动触发镜像
-
-使用 `mirror-push` 工具手动触发镜像推送：
-
-```bash
-# 镜像单个仓库
-./mirror-push -repo project1
-
-# 镜像所有仓库
-./mirror-push -all
-
-# 指定镜像目标
-./mirror-push -repo project1 -target backup-server
-
-# 异步推送
-./mirror-push -repo project1 -async
-```
-
-#### 定时镜像
-
-系统在守护模式下会按照 `mirror.schedule` 设定的时间自动执行镜像推送。支持标准的 cron 表达式：
-
-- `@hourly`：每小时执行
-- `@daily`：每天执行
-- `0 2 * * *`：每天凌晨 2 点执行
 
 ### Git 协议兼容性
 
 系统完全兼容标准 Git 协议，支持：
 
-- **标准 Git 命令**：`git clone`、`git push`、`git pull` 等
-- **协议错误处理**：提供用户友好的错误信息
-- **输出分离**：审计信息输出到 stderr，避免干扰 Git 协议通信
-- **权限拒绝处理**：标准的 Git 协议错误响应
+- 标准 Git 命令：git clone、git push、git pull 等
+- 协议错误处理：提供用户友好的错误信息
+- 输出分离：审计信息输出到 stderr，避免干扰 Git 协议通信
+- 权限拒绝处理：标准的 Git 协议错误响应
 
 ## 项目结构
 
@@ -301,7 +231,6 @@ mirror:
 gitolite-golang/
 ├── cmd/
 │   ├── gitolite-shell/     # 主程序入口
-│   └── mirror-push/        # 镜像推送工具
 ├── internal/
 │   ├── access/            # 权限控制模块
 │   ├── audit/             # 审计系统
@@ -396,9 +325,6 @@ go mod tidy
 # 构建主程序
 go build -o gitolite-shell ./cmd/gitolite-shell
 
-# 构建镜像工具
-go build -o mirror-push ./cmd/mirror-push
-
 # 运行测试
 go test ./...
 
@@ -469,3 +395,6 @@ gofmt -w .
 ---
 
 **注意**：本项目是 Gitolite 的 Go 语言重写版本，旨在提供更好的性能和可维护性，同时保持与原版的功能兼容性。
+
+##BUG
+Gerrit replication 删除事件无法执行

@@ -116,6 +116,28 @@ func ensureRepoExists(repoPath string) error {
 	return nil
 }
 
+// ListRefs lists all refs in a Git repository
+func ListRefs(repoPath string) ([]string, error) {
+	cmd := exec.Command("git", "for-each-ref", "--format=%(refname)")
+	cmd.Dir = repoPath
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list refs: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var refs []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			refs = append(refs, line)
+		}
+	}
+
+	return refs, nil
+}
+
 func InitBareRepository(repoPath string) error {
 	// Fix: Execute command directly in the repository path
 	cmd := exec.Command("git", "init", "--bare")
@@ -241,6 +263,9 @@ func GetUpdatedRefs(repoPath string) ([]RefUpdate, error) {
 			continue
 		}
 
+		// Check if the reference currently exists (if not, it was deleted)
+		_, refExists := currentRefs[refName]
+
 		// Try to extract old hash value from message
 		// Format is usually: "update by push" or "commit: <message>"
 		oldHash := ""
@@ -252,6 +277,20 @@ func GetUpdatedRefs(repoPath string) ([]RefUpdate, error) {
 			if err == nil {
 				oldHash = strings.TrimSpace(string(oldHashBytes))
 			}
+		}
+
+		// Handle deletion case: if reference doesn't exist but we have reflog entry
+		if !refExists {
+			// This is a deletion, set newHash to zero hash
+			newHash = "0000000000000000000000000000000000000000"
+			// Try to get the last known hash as oldHash
+			if oldHash == "" {
+				// Use the hash from the reflog entry as the old hash (what was deleted)
+				oldHash = parts[0] // The hash from reflog is what the ref pointed to before deletion
+			}
+		} else {
+			// Reference exists, use its current hash as newHash
+			newHash = currentRefs[refName]
 		}
 
 		// If unable to get old hash from reflog, use empty hash
@@ -276,4 +315,30 @@ func GetUpdatedRefs(repoPath string) ([]RefUpdate, error) {
 	}
 
 	return updates, nil
+}
+
+func ExecuteGitUploadPackWithHideRefs(repo, repoBase string, hidePatterns []string) error {
+	// Validate repository path using the validator
+	validatedPath, err := validator.ValidatePath(repoBase, repo+".git")
+	if err != nil {
+		return fmt.Errorf("invalid repository path: %w", err)
+	}
+	repoPath := validatedPath
+
+	// Build command: git -c uploadpack.hideRefs=pattern ... upload-pack <repoPath>
+	args := make([]string, 0, len(hidePatterns)*2+2)
+	for _, p := range hidePatterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		args = append(args, "-c", "uploadpack.hideRefs="+p)
+	}
+	args = append(args, "upload-pack", repoPath)
+
+	cmd := exec.Command("git", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }

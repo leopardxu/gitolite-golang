@@ -4,25 +4,22 @@ import (
 	"fmt"
 	"os"
 
-	"gitolite-golang/internal/mirror"
-
 	"gopkg.in/yaml.v2"
 )
 
 // Config structure definition
 type Config struct {
-	RepoBase        string              `yaml:"repo_base"`
-	GerritURL       string              `yaml:"gerrit_url"`
-	GerritUser      string              `yaml:"gerrit_user"`
-	GerritRemoteURL string              `yaml:"gerrit_remote_url"` // Add Gerrit remote URL configuration
-	GerritAPIToken  string              `yaml:"gerrit_api_token"`
-	AuthorizedKeys  string              `yaml:"authorized_keys"`
-	AccessConfig    string              `yaml:"access_config"` // Path to Gitolite-style permission configuration file
-	HooksDir        string              `yaml:"hooks_dir"`     // Hook scripts directory
-	Mirror          mirror.MirrorConfig `yaml:"mirror"`        // Mirror configuration
-	Log             LogConfig           `yaml:"log"`
-	Audit           AuditConfig         `yaml:"audit"`     // Audit configuration
-	Whitelist       WhitelistConfig     `yaml:"whitelist"` // Whitelist configuration
+	RepoBase        string          `yaml:"repo_base"`
+	GerritURL       string          `yaml:"gerrit_url"`
+	GerritUser      string          `yaml:"gerrit_user"`
+	GerritRemoteURL string          `yaml:"gerrit_remote_url"` // Add Gerrit remote URL configuration
+	GerritAPIToken  string          `yaml:"gerrit_api_token"`
+	AuthorizedKeys  string          `yaml:"authorized_keys"`
+	AccessConfig    string          `yaml:"access_config"` // Path to Gitolite-style permission configuration file
+	HooksDir        string          `yaml:"hooks_dir"`     // Hook scripts directory
+	Log             LogConfig       `yaml:"log"`
+	Audit           AuditConfig     `yaml:"audit"`     // Audit configuration
+	Whitelist       WhitelistConfig `yaml:"whitelist"` // Whitelist configuration
 }
 
 // LogConfig log configuration
